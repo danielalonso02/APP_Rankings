@@ -1,0 +1,2560 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import json
+from scipy.stats import percentileofscore
+import os
+import xml.etree.ElementTree as ET
+import re
+
+class PlayerNotFoundError(Exception):
+    pass
+def get_languages(label="Languages", key="languages"):
+    """
+    Displays a multiselect widget with available languages and returns the corresponding language codes.
+
+    Parameters:
+        label (str): The label to display above the multiselect widget. Default is "Languages".
+        key (str): The Streamlit key for the widget. Default is "languages".
+
+    Returns:
+        list[str]: A list of selected language codes (e.g., ["en", "fr"]).
+    """
+    languages = ["English", "Spanish", "French", "Italian", "German", "Catalan", "Portuguese"]
+    
+    # language_map = {
+    #     "English": "en",
+    #     "Spanish": "es",
+    #     "French": "fr",
+    #     "Italian": "it",
+    #     "German": "de",
+    #     "Catalan": "ca",
+    #     "Portuguese": "pt"
+    # }
+
+    selection = st.multiselect(label, languages, default=["English"], key=key)
+    #language_codes = [language_map[lang] for lang in selection if lang in language_map]
+
+    return selection
+
+
+def leer_excel_jugadores(ruta_excel):
+    """
+    Lee un archivo .txt con separador '|', omitiendo la primera línea,
+    y devuelve un DataFrame limpio.
+    
+    Parámetros:
+        ruta_txt (str): Ruta al archivo .txt
+    
+    Retorna:
+        pd.DataFrame: DataFrame limpio con los datos del archivo
+        None: si ocurre un error
+    """
+    try:
+        df = pd.read_excel(ruta_excel)
+        df["player_id"] = range(2, len(df) + 2) 
+        
+        df = df[["Jugador", "Equipo", "player_id"]] # Man
+        df.columns = df.columns.str.strip()
+
+        # Solo aplica el strip a columnas de texto
+        for col in df.select_dtypes(include=["object"]):
+            df[col] = df[col].map(lambda x: x.strip() if isinstance(x, str) else x)
+            
+        return df
+
+    except Exception as e:
+        print(f"Error al leer el archivo: {e}")
+        return None
+    
+def leer_excel_jugadores2(ruta_excel2,championship_excel,year):
+    """
+    Lee un archivo .txt con separador '|', omitiendo la primera línea,
+    y devuelve un DataFrame limpio.
+    
+    Parámetros:
+        ruta_txt (str): Ruta al archivo .txt
+    
+    Retorna:
+        pd.DataFrame: DataFrame limpio con los datos del archivo
+        None: si ocurre un error
+    """
+    ruta_excel=f"{ruta_excel2}/datos_wyscout/{championship_excel}_wyscout_{year}.xlsx"
+    try:
+        df = pd.read_excel(ruta_excel)
+        df["player_id"] = range(2, len(df) + 2) 
+        
+        df = df[["Jugador", "Equipo", "player_id"]] # Mantener el ID
+        df.columns = df.columns.str.strip()
+
+        # Solo aplica el strip a columnas de texto
+        for col in df.select_dtypes(include=["object"]):
+            df[col] = df[col].map(lambda x: x.strip() if isinstance(x, str) else x)
+            
+        return df
+
+    except Exception as e:
+        print(f"Error al leer el archivo: {e}")
+        return None
+
+def obtener_lista_jugadores(df, jugador_destacado=None):
+    """
+    A partir de un DataFrame con columnas 'Team 1' y 'Team 2',
+    devuelve una lista ordenada y sin duplicados de todos los equipos.
+    
+    Si se proporciona un equipo_destacado, lo coloca al principio de la lista.
+    """
+    if "Jugador" not in df.columns:
+        return []
+ 
+    jugadores = df["Jugador"]
+    # Mantener el orden original del Excel (igual que obtener_id_jugador usa df.index + 2)
+    # NO usar sorted() porque cambia el orden y el player_id calculado por índice no coincide
+    jugadores = jugadores.dropna()
+    _, idx = np.unique(jugadores, return_index=True)
+    jugadores_ordenados = list(jugadores.iloc[np.sort(idx)])
+ 
+    if jugador_destacado and jugador_destacado in jugadores_ordenados:
+        jugadores_ordenados.remove(jugador_destacado)
+        jugadores_ordenados.insert(0, jugador_destacado)
+ 
+    return jugadores_ordenados
+
+
+def select_competicion(key="competicion"):
+    """
+    Muestra un selectbox con nombres de competiciones y retorna el ID correspondiente al seleccionado.
+    """
+    competiciones = {
+        "Liga F": "LigaF",
+        "Première Ligue": "LigaFrancesa",
+        "Liga Portuguesa": "portugal",
+        "Bundesliga femenina": "bundes",
+        "Serie A Women": "italia",
+        "Primera Federación": "Segunda"
+    }
+
+    seleccion = st.selectbox("Competición:", list(competiciones.keys()), key=key)
+    return competiciones[seleccion]
+
+def select_season(key="temporada"):
+    """
+    Muestra un selectbox con temporadas y retorna el año inicial (ej: '25/26' → 2025).
+    """
+    temporadas = ["24/25","25/26"]
+    seleccion = st.selectbox("Temporada:", temporadas, key=key)
+    
+    # Extraer los dos primeros dígitos y convertirlos en año completo (2000+)
+    year = int("20" + seleccion.split("/")[0])
+    return year
+
+def select_season_static():
+    """
+    Muestra un selectbox con temporadas y retorna el año inicial (ej: '25/26' → 2025).
+    """
+    temporadas = ["25/26"]
+    seleccion = st.selectbox("Temporada:", temporadas)
+    
+    # Extraer los dos primeros dígitos y convertirlos en año completo (2000+)
+    year = int("20" + seleccion.split("/")[0])
+    return year
+
+def obtener_id_jugador(ruta_excel,player_name=None):
+    try:
+        df = pd.read_excel(ruta_excel)
+        df=df[["Jugador"]]
+        df["Jugador"]=df["Jugador"].astype(str).str.strip()
+        df=df.reset_index(drop=True)
+        df["player_id"] = df.index + 2
+        player_row = df[df["Jugador"] == player_name]
+
+        if not player_row.empty:
+            
+            return int(player_row.iloc[0]["player_id"])
+        else:
+            print(f"Empty row: {player_name}")
+            return None
+
+    except Exception as e:
+        print(f"Error al leer el archivo: {e}")
+        return None
+    
+def obtener_id_jugador_df(df, player_name=None):
+    """
+    Igual que obtener_id_jugador pero recibe un DataFrame ya cargado en memoria
+    en lugar de leer un archivo Excel desde disco.
+    Se usa cuando los datos se cargan mediante file_uploader.
+    """
+    try:
+        df = df[["Jugador"]].copy()
+        df["Jugador"] = df["Jugador"].astype(str).str.strip()
+        df = df.reset_index(drop=True)
+        df["player_id"] = df.index + 2
+        player_row = df[df["Jugador"] == player_name]
+
+        if not player_row.empty:
+            return int(player_row.iloc[0]["player_id"])
+        else:
+            print(f"Empty row: {player_name}")
+            return None
+
+    except Exception as e:
+        print(f"Error al obtener id del jugador: {e}")
+        return None
+
+
+def select_summary():
+    """
+    Muestra un selectbox con nombres de competiciones y retorna el ID correspondiente al seleccionado.
+    """
+    summaries = {
+        "Si": 1,
+        "No":0
+        #"1º RFEF":"1RFEF_wyscout.xlsx",
+        #"La Liga":"espana_1_2025_2025_03_03.xlsx"
+    }
+
+    seleccion = st.selectbox("Resumen:", list(summaries.keys()))
+    return summaries[seleccion]
+
+
+def filter_df_show(ruta_excel):
+    print(f"FILTER: {ruta_excel}")
+    try:
+        df = pd.read_excel(ruta_excel)
+        df_filtered=df[["Jugador","Equipo","Equipo durante el período seleccionado","Posición específica","Edad","Minutos jugados"]]
+        df_filtered = df_filtered.rename(columns={"Jugador": "Jugadora"})
+        return df_filtered
+    except Exception as e:
+        print(f"Error al leer el archivo: {e}")
+        return None
+
+def filter_df_show1(ruta_excel,player_name):
+    print(f"FILTER: {ruta_excel}")
+    try:
+        df = pd.read_excel(ruta_excel)
+        df_filtered=df[["Jugador","Equipo","Posición específica","Edad","Minutos jugados"]]
+        df_sorted = df.sort_values(by="Jugador")
+        print(df_sorted["Jugador"].iloc[0])
+        df_filtered = df_filtered.query("Jugador == @player_name")
+        df_filtered = df_filtered.rename(columns={"Jugador": "Jugadora"})
+        
+        return df_filtered
+    except Exception as e:
+        print(f"Error al leer el archivo: {e}")
+        return None
+def from_excel_to_str(championship_excel):
+    dictionary={"2RFEF":"2º RFEF","1RFEF":"1º RFEF","2Division":"La Liga 2","LaLiga":"La Liga"}
+    
+    liga_str = dictionary.get(championship_excel, "2º RFEF")
+    return liga_str
+
+def basic_info_player(wyscout_file,player_id_analizing,min_minutos):
+    print("IN")
+    try:
+        df_stats = pd.read_excel(wyscout_file)
+        
+        
+    except FileNotFoundError:
+        print(f"Error: El archivo '{wyscout_file}' no existe.")
+        return None,None,None,None, None, None
+    #pongo el player_id para cada jugado, los identificaremos con esto
+    #print(f"COLUMNAS: {df_stats.columns}")
+    df_stats = df_stats.reset_index(drop=True)
+    
+    df_stats["player_id"] = df_stats.index + 2
+    print(f"DF STATS: {df_stats}")
+    #filtramos por minutos jugados la base de datos
+    df_stats=df_stats[df_stats["Minutos jugados"]>=min_minutos]
+    
+    if df_stats.empty:
+        print(f"No hay jugadores con más de {min_minutos} minutos jugados.")
+        return None
+    
+    
+    class PlayerNotFoundError(Exception):
+        pass
+    if player_id_analizing not in df_stats["player_id"].values:
+        raise PlayerNotFoundError(f"El jugador elegido, {player_id_analizing}, no está en la base de datos o ha jugado menos de {min_minutos}.")
+        return None
+    df_stats.fillna(df_stats.mean(numeric_only=True),inplace=True)
+    
+    positions_dict={"GK":"portero","LB":"lateral","RB":"lateral","DMF":"defmid","OF":"ofmid",
+                    "AMF":"ofmid","LCB":"defensa","RCB":"defensa","LWF":"extremo","RWF":"extremo",
+                    "LAMF":"ofmid","RAMF":"ofmid","LCMF":"ofmid","RCMF":"ofmid","CF":"delantero",
+                    "CB":"defensa","RW":"extremo","LDMF":"defmid","LW":"extremo","RDMF":"defmid",
+                    }
+    positions=["portero","defensa","defmid","ofmid","lateral","delantero","extremo"]
+    
+    
+    #con esta funcion se mapean las posiciones especificas a las generales
+    def map_positions(positions_str):
+        positions = positions_str.split(", ")  
+        general_positions = [positions_dict.get(pos, pos) for pos in positions]  
+        unique_positions = set(general_positions)  
+        return ", ".join(unique_positions)  # Unir las posiciones únicas
+
+    df_stats["general_position"] = df_stats["Posición específica"].apply(map_positions)
+
+    df_stats[['general_position', 'general_position2',"general_position3"]] = df_stats['general_position'].str.split(", ", n=2, expand=True)
+
+    general_stats=df_stats[["Jugador","Equipo","Equipo durante el período seleccionado","Edad","Valor de mercado","Vencimiento contrato","Partidos jugados","Minutos jugados","player_id",'general_position', 'general_position2',"general_position3"]].copy()
+
+    general_stats_player=general_stats[general_stats["player_id"]==player_id_analizing]
+    
+    dict_positions_nice={"portero":"Portero","defensa":"Defensa","lateral":"Lateral","defmid":"Centrocampista defensivo",
+                         "ofmid":"Centrocampista ofensivo","delantero":"Delantero","extremo":"Extremo"}
+    
+    if not general_stats_player.empty:
+        row = general_stats_player.iloc[0]
+
+        player_name = row["Jugador"]
+        player_team = row["Equipo"]
+        loan_team = row["Equipo durante el período seleccionado"]
+        player_age = row["Edad"]
+        player_minutes = row["Minutos jugados"]
+        player_pos1 = dict_positions_nice.get(row["general_position"], None)
+        player_pos2 =  dict_positions_nice.get(row["general_position2"], None)
+        player_pos3 =  dict_positions_nice.get(row["general_position3"], None)
+    
+    return player_name,player_team,loan_team,player_age,player_minutes,player_pos1,player_pos2,player_pos3
+
+def convert_season(year):
+    dict_seasons={2022:"22/23",2023:"23/24",2024:"24/25",2025:"25/26"}
+    
+    season=dict_seasons.get(year,"25/26")
+    return season
+
+
+def extract_arrays_wyscout(wyscout_file,parameters_file_,player_id_analizing,param_entry,min_minutes):
+    
+    if not os.path.exists(wyscout_file):
+        raise FileNotFoundError(f"El fichero '{wyscout_file}' no existe.")
+        
+    if not os.path.exists(parameters_file_):
+        raise FileNotFoundError(f"El fichero '{wyscout_file}' no existe.")
+
+    df_stats=pd.read_excel(wyscout_file)
+    for i,row in df_stats.iterrows():
+        df_stats.loc[i,"player_id"]=i+2
+    df_stats=df_stats[df_stats["Minutos jugados"]>min_minutes]
+    positions_dict={"GK":"portero","LB":"lateral","RB":"lateral","DMF":"defmid","OF":"ofmid",
+                     "AMF":"ofmid","LCB":"defensa","RCB":"defensa","LWF":"extremo","RWF":"extremo",
+                     "LAMF":"ofmid","RAMF":"ofmid","LCMF":"ofmid","RCMF":"ofmid","CF":"delantero",
+                     "CB":"defensa","RW":"extremo","LDMF":"defmid","LW":"extremo","RDMF":"defmid",
+                     "RWB":"lateral","LWB":"lateral"
+                     }
+
+    positions=["portero","defensa","defmid","ofmid","lateral","delantero","extremo"]
+    parameters = {}
+    for position in positions:
+        try:
+            df_position = pd.read_excel(parameters_file_, sheet_name=position)
+
+            # Crear un diccionario con las claves 'ofensive' y 'defensive' y los valores correspondientes
+            parameters[position] = {
+                "ofensive": df_position['ofensivo'].dropna().tolist(),  # Convertir la columna 'ofensivo' en lista
+                "defensive": df_position['defensivo'].dropna().tolist(),  # Convertir la columna 'defensivo' en lista
+                "of_number": df_position["PizzaPlot_of"].dropna().tolist(),
+                "ofensive_es":df_position['ofensivo es'].dropna().tolist(),
+                "defensive_es":df_position['defensivo es'].dropna().tolist(),
+            }
+        except Exception as e:
+            print(f"Error al procesar la posición {position}: {e}")
+        except ValueError:
+            print(f"Hoja '{position}' no encontrada en el archivo.")
+    #con esta funcion se mapean las posiciones especificas a las generales
+    def map_positions(positions_str):
+        positions = positions_str.split(", ")  
+        general_positions = [positions_dict.get(pos, pos) for pos in positions]  
+        unique_positions = set(general_positions)  
+        return ", ".join(unique_positions)  # Unir las posiciones únicas
+
+    df_stats["general_position"] = df_stats["Posición específica"].apply(map_positions)
+    #aqui terminamos de mapear las posiciones
+    df_stats[['general_position', 'general_position2',"general_position3"]] = df_stats['general_position'].str.split(", ", n=2, expand=True)
+    df_stats.fillna(df_stats.mean(numeric_only=True),inplace=True)
+    df_stats["general_position2"] = df_stats["general_position2"].fillna("None")
+    df_stats["general_position3"] = df_stats["general_position3"].fillna("None")
+
+    df_general_stats=df_stats[["Jugador","Equipo","Equipo durante el período seleccionado","Edad","Valor de mercado","Vencimiento contrato","Partidos jugados","Minutos jugados","player_id",'general_position', 'general_position2',"general_position3"]].copy()
+    df_player = df_general_stats[df_general_stats["player_id"] == player_id_analizing]
+    if df_player.empty:
+        general_stats_player = None
+        raise PlayerNotFoundError(
+            f"La jugadora elegida, {player_id_analizing}, no está en la base de datos o ha jugado menos de {min_minutes}."
+            )
+    else:
+        general_stats_player=df_general_stats[df_general_stats["player_id"]==player_id_analizing].iloc[0]
+    
+    
+    stats_player=df_stats[df_stats["player_id"]==player_id_analizing].iloc[0]
+    player_position=general_stats_player["general_position"]
+    df_stats_position=df_stats[(df_stats["general_position"]==player_position) | (df_stats["general_position2"]==player_position) | (df_stats["general_position3"]==player_position)].copy()
+    #print(df_stats_position["general_position"])
+    param_ofensive=parameters[player_position]["ofensive"]
+    param_of_idioma=parameters[player_position]["ofensive_es"]
+    
+    param_of_idioma = [item.replace("\\n", "") for item in param_of_idioma]
+    param_defensive=parameters[player_position]["defensive"]
+    of_number=parameters[player_position]["of_number"]
+    param_def_id=parameters[player_position]["defensive_es"]
+    param_def_id = [item.replace("\\n", "") for item in param_def_id]
+    param_ofensive1 = []
+    param_ofensive2 = []
+    min_array=[]
+    max_array=[]
+    player_array=[]
+    params_array=[]
+    all_params=param_ofensive+param_defensive   
+    # Dividir los parámetros ofensivos según el valor de of_number
+    def calculate_and_assign_percentiles(df, *column_lists):
+
+        columns = pd.Series(sum(column_lists, [])).unique().tolist()
+        
+        # Calcular los percentiles para las columnas 
+        for col in columns:
+            values = df[col].values  
+            percentiles = [
+                percentileofscore(values, x, kind='rank') 
+                for x in values
+            ]
+            
+            
+            df[col] = pd.Series(percentiles).round().astype(int).values
+        
+        return df
+    df_stats_percentile=calculate_and_assign_percentiles(df_stats_position, parameters[player_position]["defensive"], parameters[player_position]["ofensive"])
+    df_stats_percentile=df_stats_percentile[df_stats_percentile["player_id"]==player_id_analizing]
+    if df_stats_percentile.empty:
+        return None
+    ####
+    param_of1_id=[]
+    param_of2_id=[]
+    for i, param in enumerate(param_ofensive):
+        if of_number[i] == 1:
+            param_ofensive1.append(param)
+        elif of_number[i] == 2:
+            param_ofensive2.append(param)
+    for i,param in enumerate(param_of_idioma):
+        if of_number[i] == 1:
+            param_of1_id.append(param)
+        elif of_number[i] == 2:
+            param_of2_id.append(param)
+    if param_entry=="param_of1":
+        min_array=df_stats[param_ofensive1].min(axis=0)
+        max_array=df_stats[param_ofensive1].max(axis=0)
+        player_array=stats_player[param_ofensive1]
+        params_array=param_ofensive1
+        percentiles_player=df_stats_percentile[param_ofensive1].values.flatten().tolist()
+        param_en=param_of1_id
+        
+    elif param_entry=="param_of2":
+        min_array=df_stats[param_ofensive2].min(axis=0)
+        max_array=df_stats[param_ofensive2].max(axis=0)
+        player_array=stats_player[param_ofensive2]
+        params_array=param_ofensive2
+        percentiles_player=df_stats_percentile[param_ofensive2].values.flatten().tolist()
+        param_en=param_of2_id
+    elif param_entry=="param_def":
+        min_array=df_stats[param_defensive].min(axis=0)
+        max_array=df_stats[param_defensive].max(axis=0)
+        player_array=stats_player[param_defensive]
+        params_array=param_defensive
+        percentiles_player=df_stats_percentile[param_defensive].values.flatten().tolist()
+        param_en=param_def_id
+    else:
+        min_array=None
+        max_array=None
+        player_array=None
+        params_array=None
+        percentiles_player=None
+        param_en=None
+    
+    player_dictionary=dict(zip(params_array,percentiles_player))
+    
+    return player_dictionary
+
+
+def leer_excel_grupos(ruta_excel):
+    """
+    Lee un archivo .txt con separador '|', omitiendo la primera línea,
+    y devuelve un DataFrame limpio.
+    
+    Parámetros:
+        ruta_txt (str): Ruta al archivo .txt
+    
+    Retorna:
+        pd.DataFrame: DataFrame limpio con los datos del archivo
+        None: si ocurre un error
+    """
+    try:
+        df = pd.read_excel(ruta_excel)
+        df=df["Equipo"]
+        df.columns = df.columns.str.strip()
+
+        # Solo aplica el strip a columnas de texto
+        for col in df.select_dtypes(include=["object"]):
+            df[col] = df[col].map(lambda x: x.strip() if isinstance(x, str) else x)
+            
+        return df
+
+    except Exception as e:
+        print(f"Error al leer el archivo: {e}")
+        return None
+    
+def leer_excel_grupo(ruta_excel_equipos):
+    """
+    Lee un archivo .txt con separador '|', omitiendo la primera línea,
+    y devuelve un DataFrame limpio.
+    
+    Parámetros:
+        ruta_txt (str): Ruta al archivo .txt
+    
+    Retorna:
+        pd.DataFrame: DataFrame limpio con los datos del archivo
+        None: si ocurre un error
+    """
+    ruta_excel=f"{ruta_excel_equipos}"
+    try:
+        df = pd.read_excel(ruta_excel)
+        df=df[["Equipo"]]
+        df.columns = df.columns.str.strip()
+
+        # Solo aplica el strip a columnas de texto
+        for col in df.select_dtypes(include=["object"]):
+            df[col] = df[col].map(lambda x: x.strip() if isinstance(x, str) else x)
+            
+        return df
+
+    except Exception as e:
+        print(f"Error al leer el archivo: {e}")
+        return None
+
+def obtener_lista_equipos(df,equipo_destacado=None):
+    """
+    A partir de un DataFrame con columnas 'Team 1' y 'Team 2',
+    devuelve una lista ordenada y sin duplicados de todos los equipos.
+    
+    Si se proporciona un equipo_destacado, lo coloca al principio de la lista.
+    """
+    if "Equipo" not in df.columns:
+        return []
+
+    equipos =df["Equipo"]
+    equipos = equipos.dropna().unique()
+    equipos_ordenados = sorted(equipos)
+    
+    if equipo_destacado and equipo_destacado in equipos_ordenados:
+        equipos_ordenados.remove(equipo_destacado)
+        equipos_ordenados.insert(0, equipo_destacado)
+
+    return equipos_ordenados
+
+def select_group():
+    """
+    Muestra un selectbox con nombres de los grupos y retorna el ID correspondiente al seleccionado.
+
+    Returns
+    -------
+    None.
+
+    """
+    grupos = {
+        "Grupo 5": "Grupo 5"
+        }
+    # grupos = {
+    #     "Grupo 1": "Grupo 1",
+    #     "Grupo 2": "Grupo 2",
+    #     "Grupo 3": "Grupo 3",
+    #     "Grupo 4": "Grupo 4",
+    #     "Grupo 5": "Grupo 5"
+    #     }
+    seleccion=st.selectbox("Grupo:",list(grupos.keys()))
+    return grupos[seleccion]
+
+def teams_mapping(team_selected):
+    """
+    Este lo que va a hacer es linkear el nombre del equipo en el xlsx de equipos con el nombre real 
+    
+    """
+    teams_mapping = {
+        "R. S. D. Alcalá": "Águilas",
+        "C. D. Colonia Moscardó": "Almería B",
+        "U. B. Conquense": "Antoniano",
+        "C. D. Coria": "Cádiz B",
+        "Elche Ilicitano C. F.": "Deportiva Minera",
+        "C. F. Fuenlabrada": "Don Benito",
+        'Getafe C. F. "B"': "Estepona",
+        "C. F. Intercity": "Juventud Torremolinos",
+        "U. D. Las Palmas Atlético": "La Unión Atlético",
+        "C. D. A. Navalcarnero": "Linares Deportivo",
+        "Orihuela C. F.": "Orihuela",
+        "C. D. Quintanar del Rey": "Real Balompédica Linense",
+        "C. F. Rayo Majadahonda": "Recreativo Granada",
+        'Rayo Vallecano "B"': "San Fernando",
+        'Real Madrid C. F. "C"': "UCAM Murcia",
+        "U. D. San Sebastián de los Reyes": "Villanovense",
+        "Y. U. D. Socuéllamos C. F.": "Xerez Deportivo",
+        'C. D. Tenerife "B"': "Xerez"
+        }
+    return_team=teams_mapping[team_selected]
+    return return_team
+
+def filter_df_show_teams(ruta_excel,group="Grupo 1"):
+    print(f"FILTER: {ruta_excel}")
+    try:
+        df = pd.read_excel(ruta_excel,sheet_name=group)
+        df_filtered=df["Equipo"]
+        return df_filtered
+    except Exception as e:
+        print(f"Error al leer el archivo: {e}")
+        return None
+
+def select_data_percentiles():
+    """
+    Muestra un selectbox con las 4 opciones de parametros que mostrar en los percentiles
+    """
+    types_to_choose={
+        "Parámetros ofensivos 1":"param_of1",
+        "Parámetros ofensivos 2":"param_of2",
+        "Parámetros defensivos":"param_def",
+        "Parámetros físicos":"param_phys",
+        }
+    seleccion=st.selectbox("Parámetros",list(types_to_choose.keys()))
+    return types_to_choose[seleccion]
+  
+def filter_position(df_stats,player_name):
+    
+    positions_dict={"GK":"portero","LB":"lateral","RB":"lateral","DMF":"defmid","OF":"ofmid",
+                     "AMF":"ofmid","LCB":"defensa","RCB":"defensa","LWF":"extremo","RWF":"extremo",
+                     "LAMF":"ofmid","RAMF":"ofmid","LCMF":"ofmid","RCMF":"ofmid","CF":"delantero",
+                     "CB":"defensa","RW":"extremo","LDMF":"defmid","LW":"extremo","RDMF":"defmid",
+                     "RWB":"lateral","LWB":"lateral"
+                     }
+    def map_positions(positions_str):
+        positions = positions_str.split(", ")  
+        general_positions = [positions_dict.get(pos, pos) for pos in positions]  
+        unique_positions = set(general_positions)  
+        return ", ".join(unique_positions)  # Unir las posiciones únicas
+
+    df_stats["general_position"] = df_stats["Posición específica"].apply(map_positions)
+    df_stats[['general_position', 'general_position2',"general_position3"]] = df_stats['general_position'].str.split(", ", n=2, expand=True)
+    df_stats.fillna(df_stats.mean(numeric_only=True),inplace=True)
+    df_stats["general_position2"] = df_stats["general_position2"].fillna("None")
+    df_stats["general_position3"] = df_stats["general_position3"].fillna("None")
+    
+    df_stats["Jugador"]=df_stats["Jugador"].astype(str).str.strip()
+    df_stats=df_stats.reset_index(drop=True)
+    df_stats["player_id"] = df_stats.index + 2
+    
+    
+#     player_row = df_stats[df_stats["Jugador"] == player_name]
+    
+#     if not player_row.empty:
+#         return 
+    
+#     df["Jugador"]=df["Jugador"].astype(str).str.strip()
+#     df=df.reset_index(drop=True)
+#     df["player_id"] = df.index + 2
+#     player_row = df[df["Jugador"] == player_name]
+
+#     if not player_row.empty:
+        
+#         return int(player_row.iloc[0]["player_id"])
+#     else:
+#         print(f"Empty row: {player_name}")
+#         return None
+
+# except Exception as e:
+#     print(f"Error al leer el archivo: {e}")
+#     return None
+
+def select_positions():
+    """
+    Muestra un selectbox con temporadas y retorna el año inicial (ej: '25/26' → 2025).
+    """
+    posiciones = ["portero","defensa","defmid","ofmid","lateral","delantero","extremo"]
+    seleccion = st.selectbox("Posición:", posiciones)
+    return seleccion 
+
+def obtener_lista_jugadores_posicion(df, jugador_destacado=None,posicion="ALL"):
+    """
+    A partir de un DataFrame con columnas 'Team 1' y 'Team 2',
+    devuelve una lista ordenada y sin duplicados de todos los equipos.
+    
+    Si se proporciona un equipo_destacado, lo coloca al principio de la lista.
+    """
+    if "Jugador" not in df.columns:
+        return []
+
+    
+    
+    
+    positions_dict={"GK":"portero","LB":"lateral","RB":"lateral","DMF":"defmid","OF":"ofmid",
+                     "AMF":"ofmid","LCB":"defensa","RCB":"defensa","LWF":"extremo","RWF":"extremo",
+                     "LAMF":"ofmid","RAMF":"ofmid","LCMF":"ofmid","RCMF":"ofmid","CF":"delantero",
+                     "CB":"defensa","RW":"extremo","LDMF":"defmid","LW":"extremo","RDMF":"defmid",
+                     "RWB":"lateral","LWB":"lateral"
+                     }
+    def map_positions(positions_str):
+        positions = positions_str.split(", ")  
+        general_positions = [positions_dict.get(pos, pos) for pos in positions]  
+        unique_positions = set(general_positions)  
+        return ", ".join(unique_positions)  # Unir las posiciones únicas
+
+    df["general_position"] = df["Posición específica"].apply(map_positions)
+    df[['general_position', 'general_position2',"general_position3"]] = df['general_position'].str.split(", ", n=2, expand=True)
+    df.fillna(df.mean(numeric_only=True),inplace=True)
+    df["general_position2"] = df["general_position2"].fillna("None")
+    df["general_position3"] = df["general_position3"].fillna("None")
+    
+    if posicion=="ALL":
+        jugadores =df["Jugador"]
+        jugadores = jugadores.dropna().unique()
+        jugadores_ordenados = sorted(jugadores)
+    
+        if jugador_destacado and jugador_destacado in jugadores_ordenados:
+            jugadores_ordenados.remove(jugador_destacado)
+            jugadores_ordenados.insert(0, jugador_destacado)
+    
+        return jugadores_ordenados
+    else:
+        df_stats_position=df[(df["general_position"]==posicion) | (df["general_position2"]==posicion) | (df["general_position3"]==posicion)].copy()
+        jugadores =df_stats_position["Jugador"]
+        jugadores = jugadores.dropna().unique()
+        jugadores_ordenados = sorted(jugadores)
+    
+        if jugador_destacado and jugador_destacado in jugadores_ordenados:
+            jugadores_ordenados.remove(jugador_destacado)
+            jugadores_ordenados.insert(0, jugador_destacado)
+    
+        return jugadores_ordenados
+
+def leer_excel_jugadores3(ruta_excel2,championship_excel,year):
+    """
+    Lee un archivo .txt con separador '|', omitiendo la primera línea,
+    y devuelve un DataFrame limpio.
+    
+    Parámetros:
+        ruta_txt (str): Ruta al archivo .txt
+    
+    Retorna:
+        pd.DataFrame: DataFrame limpio con los datos del archivo
+        None: si ocurre un error
+    """
+    ruta_excel=f"{ruta_excel2}/{championship_excel}_wyscout_{year}.xlsx"
+    try:
+        df = pd.read_excel(ruta_excel)
+        df=df[["Jugador","Equipo","Posición específica"]]
+        df.columns = df.columns.str.strip()
+
+        # Solo aplica el strip a columnas de texto
+        for col in df.select_dtypes(include=["object"]):
+            df[col] = df[col].map(lambda x: x.strip() if isinstance(x, str) else x)
+            
+        return df
+
+    except Exception as e:
+        print(f"Error al leer el archivo: {e}")
+        return None
+    
+import unicodedata
+import os
+import pandas as pd
+
+def load_team_stats(directorio_equipos):
+    teams = {}
+    team_names = [
+        'Alhama', 'Athletic Club', 'Atletico Madrid Feminino', 'Badalona', 'Barcelona',
+        'Deportivo de La Coruña', 'Eibar', 'Espanyol', 'Granada', 'Levante',
+        'Logroño', 'Madrid CFF', 'Real Madrid', 'Real Sociedad', 'Sevilla', 'Costa Adeje Tenerife'
+    ]
+
+    # Normalize all filenames in the folder first
+    for f in os.listdir(directorio_equipos):
+        old_path = os.path.join(directorio_equipos, f)
+        new_path = os.path.join(directorio_equipos, unicodedata.normalize('NFC', f))
+        if old_path != new_path:
+            os.rename(old_path, new_path)
+
+    for team in team_names:
+        clean_team = team.strip()
+        file_name = f"Team Stats {clean_team}.xlsx"
+        file_name = unicodedata.normalize('NFC', file_name)
+        file_path = os.path.join(directorio_equipos, file_name)
+        teams[clean_team] = pd.read_excel(file_path, decimal=',')
+    
+    return teams
+
+
+def select_data_opta():
+    """
+    Muestra un selectbox con las 3 opciones de parametros que mostrar en los percentiles
+    """
+    types_to_choose={
+        "Pases":1,
+        "Faltas":4,
+        "Entradas":7,
+        "Intercepciones":8,
+        "Recuperaciones":49,
+        "Tiros de ambos equipos":16
+        }
+    seleccion=st.selectbox("Eventos",list(types_to_choose.keys()))
+    return types_to_choose[seleccion]
+
+BASE_DIR = os.path.dirname(os.path.dirname(__file__)) 
+def create_player_db(filepath_f40):
+    
+    if not os.path.exists(filepath_f40):
+        print(f"Error: El archivo '{filepath_f40}' no existe.")
+        return None , None
+
+    tree = ET.parse(filepath_f40)
+    root = tree.getroot()
+    equipos = {team.get("uID"): team.find("Name").text for team in root.findall(".//Team")}
+    jugadores_data = []
+
+    for team in root.findall(".//Team"):
+        team_name = team.find("Name").text  # Obtener el nombre del equipo
+
+        # Iterar sobre los jugadores de cada equipo
+        for player in team.findall(".//Player"):
+            player_name = player.find("Name").text  # Obtener el nombre del jugador
+            position = player.find("Position").text  # Obtener la posición del jugador
+            player_id=player.get("uID")
+            uid_number =int(player_id.lstrip('p'))
+            jersey_stat = player.find('.//Stat[@Type="jersey_num"]')
+            jersey_number = jersey_stat.text if jersey_stat is not None else None  # Manejar si no existe
+
+            # Añadir los datos a la lista, incluyendo el equipo
+            jugadores_data.append({
+                "player": player_name,
+                "player_id":uid_number,
+                "position": position,
+                "team": team_name,
+                "jersey_num": jersey_number
+            })
+
+    # Crear un DataFrame con los datos extraídos
+    df_jugadores = pd.DataFrame(jugadores_data)
+
+    #df_jugadores = df_jugadores[df_jugadores["team"] == team_analizing]
+    # antes de juntar los dos dataframes voy a quitar todas las tildes prq a veces no coinciden
+    replace_dict = str.maketrans("áéíóúÁÉÍÓÚ", "aeiouAEIOU")
+    df_jugadores["player"] = df_jugadores["player"].str.translate(replace_dict)
+    
+    df_jugadores.to_excel(f"{BASE_DIR}/data_femeni/players_relations.xlsx",index=False)
+
+#create_player_db("/Users/julieta/Desktop/data_2526/2025/f40/f40-squad-102.xml")
+
+def parse_f24(file_path_24):
+    if not os.path.exists(file_path_24):
+        print(f"Error: El archivo '{file_path_24}' no existe.")
+        return None, None
+    
+    tree = ET.parse(file_path_24)
+    root = tree.getroot()
+ 
+   
+    game = root.find("Game")
+    game_data = {attr: game.attrib[attr] for attr in game.attrib}
+    df_game = pd.DataFrame([game_data])
+    team_names = df_game[["home_team_id", "home_team_name", "away_team_id", "away_team_name"]]
+    
+    event_list = []
+    for event in game.findall("Event"):
+        event_data = {attr: event.attrib[attr] for attr in event.attrib} 
+        qualifiers = [{attr: qualifier.attrib[attr] for attr in qualifier.attrib} for qualifier in event.findall("Q")]
+        event_data["qualifiers"] = qualifiers  
+        event_list.append(event_data)
+    
+    df_events = pd.DataFrame(event_list).drop(["last_modified", "version"], axis=1)
+    df_events["keypass"] = df_events["keypass"].fillna(0)
+    df_events = df_events.astype({"id": float, "event_id": float, "type_id": float, "period_id": float,
+                                  "min": float, "sec": float, "team_id": float, "outcome": float,
+                                  "x": float, "y": float, "player_id": float, "keypass": float})
+    
+    teams = pd.concat([
+        team_names[['home_team_id', 'home_team_name']].rename(columns={'home_team_id': 'team_id', 'home_team_name': 'team_name'}),
+        team_names[['away_team_id', 'away_team_name']].rename(columns={'away_team_id': 'team_id', 'away_team_name': 'team_name'})
+    ]).drop_duplicates().astype({"team_id": float})
+    
+    df_events = df_events.merge(teams, on="team_id", how="left")
+    df_events[["timestamp", "timestamp_utc"]] = df_events[["timestamp", "timestamp_utc"]].apply(pd.to_datetime)
+    df_events["first_qualifier_id"] = df_events["qualifiers"].apply(lambda q: q[0]["qualifier_id"] if q else None).astype(float)
+    return df_events,team_names
+
+
+def extract_end_coordinates(qualifiers):
+    end_x = None
+    end_y = None
+    if isinstance(qualifiers, list):
+        for item in qualifiers:
+            if item.get("qualifier_id") == "140":
+                end_x = float(item.get("value", 0))
+            elif item.get("qualifier_id") == "141":
+                end_y = float(item.get("value", 0))
+    return pd.Series([end_x, end_y])
+
+from lxml import etree 
+import xmltodict
+def calendar(fileath_f42):
+    
+    if not os.path.exists(fileath_f42):
+        print(f"Error: El archivo '{fileath_f42}' no existe.")
+        return None
+    
+    with open(fileath_f42, 'r', encoding='utf-8') as f:
+        xml_content = f.read()
+    
+    parser = etree.XMLParser(recover=True)  # Enables recovery for malformed XML
+    tree = etree.fromstring(xml_content.encode('utf-8'), parser=parser)
+    opta_matches = xmltodict.parse(etree.tostring(tree))
+
+    #opta_matches = xmltodict.parse(f.read())
+    #logger.info(f"opta_matches: {opta_matches}")
+    teams = opta_matches['SoccerFeed']['SoccerDocument']['Squads']['Team']
+    team_name = [{'name': teams[i]['Name'], 'code': int(teams[i]['@uID'][1:])} for i in range(len(teams))]
+
+    # LOAD MATCH DATA
+    match_data = []
+    
+    with open(fileath_f42, 'r', encoding='utf-8') as f:
+        opta_matches = xmltodict.parse(f.read())
+    matches = opta_matches['SoccerFeed']['SoccerDocument']['MatchData']
+    for m in matches:
+        match = {}
+        match['date'] = m['MatchInfo']['Date']
+        if type(match['date']) != str:
+            match['date'] = m['MatchInfo']['Date']['#text']
+        match['matchday'] = int(m['MatchInfo']['@MatchDay'])
+        match['matchcode'] = int(m['@uID'][1:])
+        match['team1'] = int(m['TeamData'][0]['@TeamRef'][1:])
+        match['team2'] = int(m['TeamData'][1]['@TeamRef'][1:])
+        match['team1_name'] = ''
+        match['team2_name'] = ''
+        match['team1_score'] = m['TeamData'][0]['@Score']
+        match['team2_score'] = m['TeamData'][1]['@Score']
+        # Check if team1 plays at home
+        if m['TeamData'][0]['@Side'] != 'Home':
+            match['team2'] = int(m['TeamData'][0]['@TeamRef'][1:])
+            match['team1'] = int(m['TeamData'][1]['@TeamRef'][1:])
+            match['team2_score'] = m['TeamData'][0]['@Score']
+            match['team1_score'] = m['TeamData'][1]['@Score']
+        for t in team_name:
+            if t['code'] == match['team1']:
+                match['team1_name'] = t['name']
+            if t['code'] == match['team2']:
+                match['team2_name'] = t['name']
+        match_data.append(match)
+
+
+    # Convertir las fechas de 'date' a objetos datetime y ordenar
+    sorted_matches = sorted(match_data, key=lambda x: (x['date'], x['matchday']))
+    
+    df_matches = pd.DataFrame(sorted_matches)
+                              #, columns=[
+        #"date", "matchday", "matchcode","team1", "team1_name", "team1_score", "team2_name", "team2_score","team2"
+        #])
+    df_matches["game"]=df_matches["team1_name"] + " " + df_matches["team1_score"]+" - "+ df_matches["team2_score"] + " " +df_matches["team2_name"]
+    
+    df_matches.to_excel(f"{BASE_DIR}/data_femeni/matches_relations.xlsx",index=False)
+    
+#calendar("/Users/julieta/Desktop/data_2526/2025/f42/f42-903-2025-results.xml")  
+
+def filter_actions(df,third):
+    min_start,max_start=third
+    start_mask = (df["x"] >= min_start) & (df["x"] <= max_start)
+    df = df[start_mask]
+    return df
+
+def filter_bands(df,band):
+    if band=="Left": #banda izq
+        df=df[df["y"]>66.67]
+    elif band=="Right": #banda dcha
+        df=df[df["y"]<33.34]
+    elif band=="Both":
+        df=df[(df["y"]<33.34) | (df["y"]>66.67)]
+    return df
+
+    return df
+def filter_actions_passes(df, start_third, end_third, sideline):
+    min_start, max_start = start_third
+    min_end, max_end = end_third
+
+    # Base start mask
+    start_mask = (df["x"] >= min_start) & (df["x"] <= max_start)
+
+    # Only apply sideline restriction for numeric sideline values
+    if sideline == 2:  # top third
+        start_mask &= (df["y"] >= 66.67)
+    elif sideline == 3:  # bottom third
+        start_mask &= (df["y"] <= 33.34)
+    
+    # If sideline is one of the override options, skip the start mask restriction
+    if sideline in ["Left", "Right", "Both"]:
+        df_filtered = df.copy()
+    else:
+        df_filtered = df[start_mask].copy()
+
+    # End position filter
+    end_mask = (df_filtered["end_x"] >= min_end) & (df_filtered["end_x"] <= max_end)
+    
+    # Apply sideline overrides to END position
+    if sideline == "Left":  
+        end_mask &= (df_filtered["y"] >= 66.67)
+    elif sideline == "Right":  
+        end_mask &= (df_filtered["y"] <= 33.34)
+    elif sideline == "Both":
+        end_mask &= ((df_filtered["y"] <= 33.34) | (df_filtered["y"] >= 66.67))
+
+    # Apply final filter
+    df_filtered = df_filtered[end_mask]
+
+    return df_filtered
+# def filter_actions_passes(df, start_third, end_third, sideline):
+#     min_start,max_start=start_third
+#     min_end,max_end=end_third
+#     start_mask = (df["x"] >= min_start) & (df["x"] <= max_start)
+    
+#     # Apply sideline restriction (if needed)
+#     if sideline == 2:  # top third
+#         start_mask &= (df["y"] >= 66.67)
+#     elif sideline == 3:  # bottom third
+#         start_mask &= (df["y"] <= 33.34)
+
+#     # Filter dataframe by start mask
+#     df = df[start_mask]
+
+#     # End position filter
+#     end_mask = (df["end_x"] >= min_end) & (df["end_x"] <= max_end)
+    
+#     if sideline == "Left":  # top third
+#         end_mask |= (df["end_y"] >= 66.67)
+#     elif sideline == "Right":  # bottom third
+#         end_mask |= (df["end_y"] <= 33.34)
+#     elif sideline=="Both":
+#         end_mask |= ((df["end_y"] <= 33.34) | df["end_y"] >= 66.67)
+
+#     # Apply final filter
+#     df = df[end_mask]
+
+#     return df
+
+def get_all_matches(team_name,df_matches):
+    
+    mask = (df_matches["team1_name"] == team_name) | (df_matches["team2_name"] == team_name)
+    return df_matches.loc[mask, "matchcode"].tolist()
+
+        
+def get_all_matches_df(list_matches, player_id):
+    all_dfs = []
+    for match_id in list_matches:
+        ruta_opta_f24 = os.path.join(BASE_DIR, "data_femeni", "raw", "f24", f"f24-903-2025-{match_id}-eventdetails.xml")
+        df_events, team_names = parse_f24(ruta_opta_f24)
+
+        # Skip if parsing failed
+        if df_events is None or not isinstance(df_events, pd.DataFrame):
+            print(f"⚠️ Skipping match {match_id}: parse_f24() returned None or invalid data.")
+            continue
+
+        df_events["matchcode"] = match_id
+        all_dfs.append(df_events)
+    
+    if not all_dfs:
+        return pd.DataFrame()
+    
+    big_df = pd.concat(all_dfs, ignore_index=True)
+    big_df = big_df[big_df["player_id"] == player_id]
+    
+    return big_df
+        
+def parse_allf70(folder_path):
+    
+    def parse_player(player, team_side, team_ref):
+        data = {
+            "PlayerRef": player.attrib.get("PlayerRef"),
+            "ShirtNumber": int(player.attrib.get("ShirtNumber")),
+            "Position": player.attrib.get("Position"),
+            "Status": player.attrib.get("Status"),
+            "TeamSide": team_side,
+            "TeamRef": team_ref
+        }
+        for stat in player.findall("Stat"):
+            try:
+                data[stat.attrib["Type"]] = float(stat.text)
+            except:
+                data[stat.attrib["Type"]] = stat.text
+        return data
+
+    all_players = []
+
+    for filename in os.listdir(folder_path):
+        if not filename.endswith('.xml'):
+            continue
+        fullname = os.path.join(folder_path, filename)
+        
+        tree = ET.parse(fullname)
+        root = tree.getroot()
+       
+        for team in root.findall(".//TeamData"):
+            team_side = team.attrib.get("Side")
+            team_ref = team.attrib.get("TeamRef")
+            for player in team.findall(".//MatchPlayer"):
+                all_players.append(parse_player(player, team_side, team_ref))
+
+
+    df_players = pd.DataFrame(all_players)
+    non_numeric_cols = [c for c in df_players.select_dtypes(exclude='number').columns if c != 'PlayerRef']
+
+    # Group numeric columns and sum
+    numeric_cols = df_players.select_dtypes(include='number').columns
+    df_grouped = df_players.groupby('PlayerRef')[numeric_cols].sum().reset_index()
+
+    # Group non-numeric columns and take the first value
+    df_non_numeric = df_players.groupby('PlayerRef')[non_numeric_cols].first().reset_index()
+
+    # Merge numeric and non-numeric
+    df_players_summary = pd.merge(df_grouped, df_non_numeric, on='PlayerRef')
+    
+    df_players_summary["PlayerRef"] = df_players_summary["PlayerRef"].str.lstrip('p')
+    df_players_summary["PlayerRef"] = df_players_summary["PlayerRef"].astype(int)
+
+    
+    return df_players_summary     
+
+def leer_excel_jugadores2_opta(ruta_excel2,championship_excel,year):
+    """
+    Lee un archivo .txt con separador '|', omitiendo la primera línea,
+    y devuelve un DataFrame limpio.
+    
+    Parámetros:
+        ruta_txt (str): Ruta al archivo .txt
+    
+    Retorna:
+        pd.DataFrame: DataFrame limpio con los datos del archivo
+        None: si ocurre un error
+    """
+    ruta_excel=f"{ruta_excel2}/{championship_excel}_opta_{year}.xlsx"
+    try:
+        df = pd.read_excel(ruta_excel)
+        df=df[["player_name","team_name"]]
+        df.columns = df.columns.str.strip()
+
+        # Solo aplica el strip a columnas de texto
+        for col in df.select_dtypes(include=["object"]):
+            df[col] = df[col].map(lambda x: x.strip() if isinstance(x, str) else x)
+            
+        return df
+
+    except Exception as e:
+        print(f"Error al leer el archivo: {e}")
+        return None
+    
+def leer_excel_jugadores2_opta_mins(ruta_excel2,championship_excel,year,minutes):
+    """
+    Lee un archivo .txt con separador '|', omitiendo la primera línea,
+    y devuelve un DataFrame limpio.
+    
+    Parámetros:
+        ruta_txt (str): Ruta al archivo .txt
+    
+    Retorna:
+        pd.DataFrame: DataFrame limpio con los datos del archivo
+        None: si ocurre un error
+    """
+    ruta_excel=f"{ruta_excel2}/{championship_excel}_opta_{year}.xlsx"
+    try:
+        df = pd.read_excel(ruta_excel)
+        if "Time Played" not in df.columns:
+            print("NO HAY TIME PLAYED")
+        df=df[df["Time Played"]>=minutes]
+        df=df[["player_name","team_name"]]
+        df.columns = df.columns.str.strip()
+
+        # Solo aplica el strip a columnas de texto
+        for col in df.select_dtypes(include=["object"]):
+            df[col] = df[col].map(lambda x: x.strip() if isinstance(x, str) else x)
+            
+        return df
+
+    except Exception as e:
+        print(f"Error al leer el archivo: {e}")
+        return None
+    
+def leer_excel_jugadores2_opta_mins_player(ruta_excel2,championship_excel,year,minutes,position):
+    """
+    Lee un archivo .txt con separador '|', omitiendo la primera línea,
+    y devuelve un DataFrame limpio.
+    
+    Parámetros:
+        ruta_txt (str): Ruta al archivo .txt
+    
+    Retorna:
+        pd.DataFrame: DataFrame limpio con los datos del archivo
+        None: si ocurre un error
+    """
+    ruta_excel=f"{ruta_excel2}/{championship_excel}_opta_{year}.xlsx"
+    try:
+        df = pd.read_excel(ruta_excel)
+        if "Time Played" not in df.columns:
+            print("NO HAY TIME PLAYED")
+        df=df[(df["Time Played"]>=minutes) & (df["position"]==position)]
+        df=df[["player_name","team_name"]]
+        df.columns = df.columns.str.strip()
+
+        # Solo aplica el strip a columnas de texto
+        for col in df.select_dtypes(include=["object"]):
+            df[col] = df[col].map(lambda x: x.strip() if isinstance(x, str) else x)
+            
+        return df
+
+    except Exception as e:
+        print(f"Error al leer el archivo: {e}")
+        return None
+def obtener_lista_jugadores_opta(df, jugador_destacado=None):
+    """
+    A partir de un DataFrame con columnas 'Team 1' y 'Team 2',
+    devuelve una lista ordenada y sin duplicados de todos los equipos.
+    
+    Si se proporciona un equipo_destacado, lo coloca al principio de la lista.
+    """
+    if "player_name" not in df.columns:
+        return []
+
+    jugadores =df["player_name"]
+    jugadores = jugadores.dropna().unique()
+    jugadores_ordenados = sorted(jugadores)
+
+    if jugador_destacado and jugador_destacado in jugadores_ordenados:
+        jugadores_ordenados.remove(jugador_destacado)
+        jugadores_ordenados.insert(0, jugador_destacado)
+
+    return jugadores_ordenados
+
+def obtener_id_jugador_opta(ruta_excel,player_name=None):
+    try:
+        df = pd.read_excel(ruta_excel)
+        
+        df["player_name"]=df["player_name"].astype(str).str.strip()
+        player_row=df[df["player_name"] == player_name]
+        
+
+        if not player_row.empty:
+            
+            return int(player_row.iloc[0]["player_id"])
+        else:
+            print(f"Empty row: {player_name}")
+            return None
+
+    except Exception as e:
+        print(f"Error al leer el archivo: {e}")
+        return None
+def obtener_posicion_jugador_opta(ruta_excel,player_name=None):
+    try:
+        df = pd.read_excel(ruta_excel)
+        
+        df["player_name"]=df["player_name"].astype(str).str.strip()
+        print("DF COLUMNS")
+        print(df.columns)
+        player_row=df[df["player_name"] == player_name]
+        
+        
+        
+        if not player_row.empty:
+            
+            return (player_row.iloc[0]["position"])
+        else:
+            print(f"Empty row: {player_name}")
+            return None
+
+    except Exception as e:
+        print(f"Error al leer el archivo: {e}")
+        return None
+
+
+
+
+def leer_excel_jugadores_opta(ruta_excel):
+    """
+    Lee un archivo .txt con separador '|', omitiendo la primera línea,
+    y devuelve un DataFrame limpio.
+    
+    Parámetros:
+        ruta_txt (str): Ruta al archivo .txt
+    
+    Retorna:
+        pd.DataFrame: DataFrame limpio con los datos del archivo
+        None: si ocurre un error
+    """
+    try:
+        df = pd.read_excel(ruta_excel)
+        df=df[["player_name","team_name"]]
+        df.columns = df.columns.str.strip()
+
+        # Solo aplica el strip a columnas de texto
+        for col in df.select_dtypes(include=["object"]):
+            df[col] = df[col].map(lambda x: x.strip() if isinstance(x, str) else x)
+            
+        return df
+
+    except Exception as e:
+        print(f"Error al leer el archivo: {e}")
+        return None
+
+
+def filter_df_show_opta(ruta_excel):
+    print(f"FILTER: {ruta_excel}")
+    try:
+        df = pd.read_excel(ruta_excel)
+        df_filtered=df[["player_name","team_name","position","age","Time Played"]]
+        df_filtered = df_filtered.rename(columns={"player_name": "Jugadora"})
+        return df_filtered
+    except Exception as e:
+        print(f"Error al leer el archivo: {e}")
+        return None
+    
+def filter_df_show_opta_id(ruta_excel,player_id):
+    print(f"FILTER: {ruta_excel}")
+    try:
+        df = pd.read_excel(ruta_excel)
+        df=df[df["player_id"]==player_id]
+        df_filtered=df[["player_name","team_name","position","age","Time Played"]]
+        df_filtered = df_filtered.rename(columns={"player_name": "Jugadora"})
+        df_filtered
+        return df_filtered
+    except Exception as e:
+        print(f"Error al leer el archivo: {e}")
+        return None
+    
+def select_positions_opta():
+    """
+    Muestra un selectbox con temporadas y retorna el año inicial (ej: '25/26' → 2025).
+    """
+    posiciones = {"Portera":"Goalkeeper","Defensa":"Defender",
+                  "Centrocampista":"Midfielder","Delantera":"Forward"}
+    seleccion = st.selectbox("Posición:", posiciones)
+    seleccion=posiciones[seleccion]
+    return seleccion 
+  
+def leer_excel_jugadores3_opta(ruta_excel2,championship_excel,year,minutes):
+    """
+    Lee un archivo .txt con separador '|', omitiendo la primera línea,
+    y devuelve un DataFrame limpio.
+    
+    Parámetros:
+        ruta_txt (str): Ruta al archivo .txt
+    
+    Retorna:
+        pd.DataFrame: DataFrame limpio con los datos del archivo
+        None: si ocurre un error
+    """
+    ruta_excel=f"{ruta_excel2}/{championship_excel}_opta_{year}.xlsx"
+    try:
+        df = pd.read_excel(ruta_excel)
+        df=df[df["Time Played"]>=minutes]
+        df=df[["player_name","team_name","position"]]
+        df.columns = df.columns.str.strip()
+
+        # Solo aplica el strip a columnas de texto
+        for col in df.select_dtypes(include=["object"]):
+            df[col] = df[col].map(lambda x: x.strip() if isinstance(x, str) else x)
+            
+        return df
+
+    except Exception as e:
+        print(f"Error al leer el archivo: {e}")
+        return None
+    
+    
+def obtener_lista_jugadores_posicion_opta(df, jugador_destacado=None,posicion="ALL"):
+    """
+    A partir de un DataFrame con columnas 'Team 1' y 'Team 2',
+    devuelve una lista ordenada y sin duplicados de todos los equipos.
+    
+    Si se proporciona un equipo_destacado, lo coloca al principio de la lista.
+    """
+    if "player_name" not in df.columns:
+        return []
+
+    if posicion=="ALL":
+        jugadores =df["player_name"]
+        jugadores = jugadores.dropna().unique()
+        jugadores_ordenados = sorted(jugadores)
+    
+        if jugador_destacado and jugador_destacado in jugadores_ordenados:
+            jugadores_ordenados.remove(jugador_destacado)
+            jugadores_ordenados.insert(0, jugador_destacado)
+    
+        return jugadores_ordenados
+    else:
+        df_stats_position=df[(df["position"]==posicion)].copy()
+        jugadores =df_stats_position["player_name"]
+        jugadores = jugadores.dropna().unique()
+        jugadores_ordenados = sorted(jugadores)
+    
+        if jugador_destacado and jugador_destacado in jugadores_ordenados:
+            jugadores_ordenados.remove(jugador_destacado)
+            jugadores_ordenados.insert(0, jugador_destacado)
+    
+        return jugadores_ordenados 
+    
+    
+def filter_df_show_opta1(ruta_excel,player_name):
+    print(f"FILTER: {ruta_excel}")
+    try:
+        df = pd.read_excel(ruta_excel)
+        df_filtered=df[["player_name","team_name","position","age","Time Played"]]
+        
+        df_filtered = df_filtered.query("player_name == @player_name")
+        df_filtered = df_filtered.rename(columns={"player_name": "Jugadora"})
+        return df_filtered
+    except Exception as e:
+        print(f"Error al leer el archivo: {e}")
+        return None
+
+def filter_df_show2_opta(ruta_excel, player_id1, player_id2):
+
+    
+    print(f"FILTER: {ruta_excel}")
+    try:
+        df = pd.read_excel(ruta_excel)
+        player_ids = [player_id1, player_id2]
+        df_filtered = df.query("player_id in @player_ids")
+        
+        df_filtered = df_filtered[["player_name", "team_name", "position", "age", "Time Played"]]
+        
+        # Filter by player names
+        
+        
+        # Sort the filtered dataframe
+        df_filtered = df_filtered.sort_values(by="player_name")
+        
+        # Optional: print first player
+        if not df_filtered.empty:
+            print(df_filtered["player_name"].iloc[0])
+        
+        return df_filtered
+    
+    except Exception as e:
+        print(f"Error al leer el archivo: {e}")
+        return None
+    
+def basic_info_player_opta(opta_filepath,player_id_analizing,min_minutos):
+    
+    print("IN")
+    try:
+        df_stats = pd.read_excel(opta_filepath)
+        
+        
+    except FileNotFoundError:
+        print(f"Error: El archivo '{opta_filepath}' no existe.")
+        return None,None,None, None, None
+    #pongo el player_id para cada jugado, los identificaremos con esto
+    #print(f"COLUMNAS: {df_stats.columns}")
+    df_stats = df_stats.reset_index(drop=True)
+
+    #filtramos por minutos jugados la base de datos
+    df_stats=df_stats[df_stats["Time Played"]>=min_minutos]
+    
+    if df_stats.empty:
+        print(f"No hay jugadores con más de {min_minutos} minutos jugados.")
+        return None
+    
+    
+    class PlayerNotFoundError(Exception):
+        pass
+    if player_id_analizing not in df_stats["player_id"].values:
+        print(f"El jugador ha jugado menos de {min_minutos} minutos.")
+        raise PlayerNotFoundError(f"El jugador elegido, {player_id_analizing}, no está en la base de datos o ha jugado menos de {min_minutos}.")
+        return None
+
+    df_stats.fillna(df_stats.mean(numeric_only=True),inplace=True)
+    
+    
+    positions=["Goalkeeper","Defender","Midfielder","Forward"]
+    
+    general_stats=df_stats[["player_name","team_name","age","Appearances","Time Played","player_id",'position']].copy()
+
+    general_stats_player=general_stats[general_stats["player_id"]==player_id_analizing]
+    dict_positions_nice={"Goalkeeper":"Portera","Defender":"Defensa","Midfielder":"Centrocampista",
+                         "Forward":"Delantera"}
+    
+    if not general_stats_player.empty:
+        row = general_stats_player.iloc[0]
+
+        player_name = row["player_name"]
+        player_team = row["team_name"]
+        player_age = row["age"]
+        player_minutes = row["Time Played"]
+        player_pos = dict_positions_nice.get(row["position"], None)
+    
+    return player_name,player_team,player_age,player_minutes,player_pos
+
+BASE_DIR = os.path.dirname(os.path.dirname(__file__)) 
+
+formulas_filepath_st=f"{BASE_DIR}/report_gen_opta/formulas.xlsx"
+print("FORMULAS PATH:",formulas_filepath_st)
+def calculate_pizza_values(df_position,position,formulas_filepath=formulas_filepath_st):
+    #formulas=pd.read_excel("/Users/julieta/Desktop/formulas.xlsx",sheet_name=player_position)
+    formulas=pd.read_excel(formulas_filepath,sheet_name=position)
+    
+    def is_convertible_to_numeric(series):
+        # Try converting, return True if any non-NaN result (means convertible)
+        return not pd.to_numeric(series, errors='coerce').isna().all()
+
+    for col in df_position.columns:
+        if is_convertible_to_numeric(df_position[col]):
+            # Convert to numeric safely
+            df_position[col] = pd.to_numeric(df_position[col], errors='coerce')
+            # Fill NaNs with median
+            df_position[col] = df_position[col].fillna(df_position[col].median())
+        else:
+            # Keep non-numeric columns as is
+            pass
+        
+    for _, row in formulas.iterrows():
+        formula = row['formula']
+        variable = row['variable_get']
+
+        # Find all columns used in the formula (assuming they are written without df[])
+        cols_in_formula = re.findall(r"'(.*?)'", formula)  # look for 'Duels won', 'Duels', etc.
+
+        # Convert those columns to numeric safely
+        for col in cols_in_formula:
+            df_position[col] = pd.to_numeric(df_position[col], errors='coerce')
+            df_position[col] = df_position[col].fillna(df_position[col].median())
+
+            # Replace column name in formula with df["col"]
+            formula = formula.replace(f"'{col}'", f'df_position["{col}"]')
+
+        # Evaluate the formula
+        try:
+            df_position[variable] = eval(formula)
+            #print(f"Successfully calculated {variable}")
+        except Exception as e:
+            print(f"Error calculating {variable}: {e}")
+            print("Formula:", formula)
+            print("Column types:", df_position[cols_in_formula].dtypes)
+            
+    return df_position
+
+def extract_arrays_opta(opta_filepath,parameters_file,player_id_analizing,param_entry,min_minutes):
+   
+    if not os.path.exists(opta_filepath):
+        print(f"El fichero {opta_filepath} no existe.")
+        return None
+    df_all_players=pd.read_excel(opta_filepath)
+    
+    if player_id_analizing not in df_all_players["player_id"].values:
+        print("No se encuentra al jugador")
+        return None
+
+    
+    df_all_players=df_all_players[df_all_players["Time Played"]>min_minutes].copy()
+    if player_id_analizing not in df_all_players["player_id"].values:
+        print(f"El jugador ha jugado menos de {min_minutes} minutos.")
+        return None
+    df_player=df_all_players[df_all_players["player_id"]==player_id_analizing]
+    player_position=df_player["position"].iloc[0]
+
+    df_position=df_all_players[df_all_players["position"]==player_position].copy()
+    #CHANGE FORMULAS FOR CORRECT PATH
+    df_position=calculate_pizza_values(df_position,player_position,formulas_filepath_st)
+    
+    df_stats=df_position
+    
+    df_stats=df_stats[df_stats["Time Played"]>min_minutes].copy()
+    positions=["Goalkeeper","Defender","Midfielder","Forward"]
+    parameters = {}
+    for position in positions:
+        try:
+            
+            df_positions = pd.read_excel(f"{BASE_DIR}/report_gen/parameters.xlsx", sheet_name=position)
+            
+            
+            # Crear un diccionario con las claves 'ofensivo' y 'defensivo' y los valores correspondientes
+            parameters[position] = {
+                "ofensive": df_positions['ofensivo'].dropna().tolist(),  # Convertir la columna 'ofensivo' en lista
+                "ofensive es":df_positions['ofensivo es'].dropna().tolist(),
+                "defensive": df_positions['defensivo'].dropna().tolist(),  # Convertir la columna 'defensivo' en lista
+                "defensive es":df_positions['defensivo es'].dropna().tolist(),
+                "of_number":df_positions["PizzaPlot_of"].dropna().tolist()
+            }
+        except ValueError:
+            print(f"Hoja '{position}' no encontrada en el archivo.")
+        except Exception as e:
+            print(f"Error al leer la hoja '{position}': {e}")
+
+    df_general_stats=df_stats[["player_name","team_name","age","Appearances","Time Played","weight","height","player_id","position"]].copy()
+
+    general_stats_player=df_general_stats[df_general_stats["player_id"]==player_id_analizing].iloc[0]
+    stats_player=df_stats[df_stats["player_id"]==player_id_analizing].iloc[0]
+    player_position=general_stats_player["position"]
+    df_stats_position=df_stats[(df_stats["position"]==player_position)].copy()
+    #print(df_stats_position["general_position"])
+    param_ofensive=parameters[player_position]["ofensive"]
+    param_of_idioma=parameters[player_position]["ofensive es"]
+
+    param_of_idioma = [item.replace("\\n", "") for item in param_of_idioma]
+    param_defensive=parameters[player_position]["defensive"]
+    of_number=parameters[player_position]["of_number"]
+    param_def_id=parameters[player_position]["defensive es"]
+    param_def_id = [item.replace("\\n", "") for item in param_def_id]
+    param_ofensive1 = []
+    param_ofensive2 = []
+    min_array=[]
+    max_array=[]
+    player_array=[]
+    params_array=[]
+    all_params=param_ofensive+param_defensive   
+
+    def calculate_and_assign_percentiles(df, *column_lists):
+
+        columns = pd.Series(sum(column_lists, [])).unique().tolist()
+        
+        # Calcular los percentiles para las columnas 
+        for col in columns:
+            values = df[col].values  
+            percentiles = [
+                percentileofscore(values, x, kind='rank') 
+                for x in values
+            ]
+            
+            
+            df[col] = pd.Series(percentiles).round().astype(int).values
+        
+        return df
+    #print(df_stats_position.columns.tolist())
+    df_stats_percentile=calculate_and_assign_percentiles(df_stats_position, parameters[player_position]["defensive"], parameters[player_position]["ofensive"])
+    df_stats_percentile=df_stats_percentile[df_stats_percentile["player_id"]==player_id_analizing]
+
+
+    param_of1_id=[]
+    param_of2_id=[]
+    for i, param in enumerate(param_ofensive):
+        if of_number[i] == 1:
+            param_ofensive1.append(param)
+        elif of_number[i] == 2:
+            param_ofensive2.append(param)
+    for i,param in enumerate(param_of_idioma):
+        if of_number[i] == 1:
+            param_of1_id.append(param)
+        elif of_number[i] == 2:
+            param_of2_id.append(param)
+    if param_entry=="param_of1":
+        min_array=df_stats[param_ofensive1].min(axis=0)
+        max_array=df_stats[param_ofensive1].max(axis=0)
+        player_array=stats_player[param_ofensive1]
+        params_array=param_ofensive1
+        percentiles_player=df_stats_percentile[param_ofensive1].values.flatten().tolist()
+        param_en=param_of1_id
+        
+    elif param_entry=="param_of2":
+        min_array=df_stats[param_ofensive2].min(axis=0)
+        max_array=df_stats[param_ofensive2].max(axis=0)
+        player_array=stats_player[param_ofensive2]
+        params_array=param_ofensive2
+        percentiles_player=df_stats_percentile[param_ofensive2].values.flatten().tolist()
+        param_en=param_of2_id
+    elif param_entry=="param_def":
+        min_array=df_stats[param_defensive].min(axis=0)
+        max_array=df_stats[param_defensive].max(axis=0)
+        player_array=stats_player[param_defensive]
+        params_array=param_defensive
+        percentiles_player=df_stats_percentile[param_defensive].values.flatten().tolist()
+        param_en=param_def_id
+    else:
+        min_array=None
+        max_array=None
+        player_array=None
+        params_array=None
+        percentiles_player=None
+        param_en=None
+    player_dictionary=dict(zip(params_array,percentiles_player))
+    
+    return player_dictionary
+    #return min_array,max_array,player_array,params_array, df_stats,percentiles_player,param_en
+    
+
+    
+
+def extract_physical_percentiles(physical_filepath, player_name, min_minutes):
+    import difflib
+    import pandas as pd
+    import os
+    import re
+    import unicodedata
+    from scipy.stats import percentileofscore
+
+    def clean_extreme(text):
+        if pd.isna(text): return ""
+        text = str(text)
+        replacements = {
+            'Ã¸': 'O', 'Ã¤': 'A', 'Ã­': 'I', 'Ã©': 'E', 'Ã¡': 'A', 
+            'Ã³': 'O', 'Ãº': 'U', 'Ã±': 'N', 'Ã': 'A', 'Â': '', 
+            'A¤': 'A', 'A©': 'E', 'A­': 'I', 'A±': 'N', 'Ã¼': 'U'
+        }
+        for bad, good in replacements.items():
+            text = text.replace(bad, good)
+        text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
+        text = text.upper()
+        text = re.sub(r'[^A-Z\s]', ' ', text)
+        return " ".join(text.split())
+
+
+    # 1. Carga de archivo
+    csv_path = f"{physical_filepath}/SkillCorner-2026-03-30.csv"
+    if not os.path.exists(csv_path):
+        print(f"El fichero físico {csv_path} no existe.")
+        return None
+
+    try:
+        df_phys = pd.read_csv(csv_path, delimiter=";", encoding="utf-8-sig")
+    except:
+        df_phys = pd.read_csv(csv_path, delimiter=";", encoding="latin1")
+
+    # Identificar columna de nombre
+    col_name = "Player" if "Player" in df_phys.columns else "Short Name"
+
+    # 2. Lógica de búsqueda de nombre (Fuzzy Match)
+    def find_best_name(target_name, options):
+        target_clean = clean_extreme(target_name)
+        # Búsqueda directa o contenida
+        for opt in options:
+            if target_clean in clean_extreme(opt) or clean_extreme(opt) in target_clean:
+                return opt
+        # Búsqueda por similitud
+        clean_options = [clean_extreme(o) for o in options]
+        matches = difflib.get_close_matches(target_clean, clean_options, n=1, cutoff=0.7)
+        return options[clean_options.index(matches[0])] if matches else None
+
+    all_names = df_phys[col_name].unique()
+    real_name = find_best_name(player_name, all_names)
+
+    # SI NO ENCUENTRA EL NOMBRE, SALIMOS
+    if not real_name:
+        print(f"No se encontró ninguna coincidencia para {player_name} en SkillCorner.")
+        return None
+
+    # --- AQUÍ ESTABA EL ERROR ---
+    # Debemos usar 'real_name' para filtrar el DataFrame, no 'player_name'
+    if real_name not in df_phys[col_name].values:
+        return None
+
+    # 3. Obtener datos de la jugadora encontrada
+    df_player = df_phys[df_phys[col_name] == real_name]
+    
+    # Comprobar si tiene posición (SkillCorner a veces usa 'Primary Position')
+    pos_col = "position" if "position" in df_phys.columns else "Primary Position"
+    if pos_col not in df_phys.columns:
+        # Si no hay columna de posición, comparamos contra todo el dataset
+        df_pos = df_phys.copy()
+    else:
+        player_position = df_player[pos_col].iloc[0]
+        df_pos = df_phys[df_phys[pos_col] == player_position].copy()
+
+    # 4. Columnas y Percentiles
+    physical_columns = [
+        "PSV-99", "Running Distance P90", "HSR Distance P90",
+        "Sprint Distance P90", "HI Count P90", "Medium Acceleration Count P90",
+        "High Acceleration Count P90", "Medium Deceleration Count P90",
+        "High Deceleration Count P90", "Explosive Acceleration to Sprint Count P90"
+    ]
+
+    player_dictionary = {}
+    for col in physical_columns:
+        if col in df_pos.columns:
+            # Limpiamos los datos de la población (por si hay strings o nulos)
+            values = pd.to_numeric(df_pos[col], errors='coerce').dropna().values
+            player_val = pd.to_numeric(df_player[col].iloc[0], errors='coerce')
+            
+            if not pd.isna(player_val) and len(values) > 0:
+                p_val = percentileofscore(values, player_val, kind='rank')
+                player_dictionary[col] = int(round(p_val))
+            else:
+                player_dictionary[col] = 0
+        else:
+            player_dictionary[col] = 0
+            
+    return player_dictionary
+
+def select_team():
+    """
+    Muestra un selectbox con teams y retorna el team id (ej: 'Real Sociedad' → ID).
+    """
+    equipos = pd.read_excel(f"{BASE_DIR}/data/Equipos_LigaF_IDS.xlsx")
+    equipos_dict = dict(zip(equipos.iloc[:, 0], equipos.iloc[:, 1]))
+
+    seleccion = st.multiselect("Equipos:", list(equipos_dict.keys()), default=["Todos"])
+
+    # Si seleccionas "Todos", devuelve todos los equipos
+    if "Todos" in seleccion:
+        seleccion = list(equipos_dict.keys())
+
+    return seleccion
+    
+def select_season_all():
+    """
+    Muestra un selectbox con temporadas y retorna el año inicial (ej: '25/26' → 2025).
+    """
+    temporadas = ["Todas","24/25","25/26"]
+    seleccion = st.selectbox("Temporada:", temporadas)
+    if seleccion == "Todas":
+        return 0
+    
+    # Extraer los dos primeros dígitos y convertirlos en año completo (2000+)
+    year = int("20" + seleccion.split("/")[0])
+    return year
+
+def calculate_pizza_values(df_position,position,formulas_filepath):
+    #formulas=pd.read_excel("/Users/julieta/Desktop/formulas.xlsx",sheet_name=player_position)
+    formulas=pd.read_excel(formulas_filepath,sheet_name=position)
+    
+    def is_convertible_to_numeric(series):
+        # Try converting, return True if any non-NaN result (means convertible)
+        return not pd.to_numeric(series, errors='coerce').isna().all()
+
+    for col in df_position.columns:
+        if is_convertible_to_numeric(df_position[col]):
+            # Convert to numeric safely
+            df_position[col] = pd.to_numeric(df_position[col], errors='coerce')
+            # Fill NaNs with median
+            if col!="Penalty Goals":
+                df_position[col] = df_position[col].fillna(df_position[col].median())
+            else:
+                df_position[col] = df_position[col].fillna(0)
+        else:
+            # Keep non-numeric columns as is
+            pass
+        
+    for _, row in formulas.iterrows():
+        formula = row['formula']
+        variable = row['variable_get']
+
+        # Find all columns used in the formula (assuming they are written without df[])
+        cols_in_formula = re.findall(r"'(.*?)'", formula)  # look for 'Duels won', 'Duels', etc.
+
+        # Convert those columns to numeric safely
+        for col in cols_in_formula:
+            df_position[col] = pd.to_numeric(df_position[col], errors='coerce')
+            df_position[col] = df_position[col].fillna(df_position[col].median())
+
+            # Replace column name in formula with df["col"]
+            formula = formula.replace(f"'{col}'", f'df_position["{col}"]')
+
+        # Evaluate the formula
+        try:
+            df_position[variable] = eval(formula)
+            #print(f"Successfully calculated {variable}")
+        except Exception as e:
+            print(f"Error calculating {variable}: {e}")
+            print("Formula:", formula)
+            print("Column types:", df_position[cols_in_formula].dtypes)
+            
+    return df_position
+def extract_arrays_wyscout_2(df_position,parameters_file,player_id_analizing,param_entry,min_minutes):
+    df_stats=df_position
+    df_stats=df_stats[df_stats["Time Played"]>min_minutes]
+    positions=["Goalkeeper","Defender","Midfielder","Forward"]
+    parameters = {}
+    for position in positions:
+        try:
+            
+            df_positions = pd.read_excel(f"{BASE_DIR}/report_gen/parameters.xlsx", sheet_name=position)
+            
+            
+            # Crear un diccionario con las claves 'ofensivo' y 'defensivo' y los valores correspondientes
+            parameters[position] = {
+                "ofensive": df_positions['ofensivo'].dropna().tolist(),  # Convertir la columna 'ofensivo' en lista
+                "ofensive es":df_positions['ofensivo es'].dropna().tolist(),
+                "defensive": df_positions['defensivo'].dropna().tolist(),  # Convertir la columna 'defensivo' en lista
+                "defensive es":df_positions['defensivo es'].dropna().tolist(),
+                "of_number":df_positions["PizzaPlot_of"].dropna().tolist()
+            }
+        except ValueError:
+            print(f"Hoja '{position}' no encontrada en el archivo.")
+        except Exception as e:
+            print(f"Error al leer la hoja '{position}': {e}")
+
+    df_general_stats=df_stats[["player_name","team_name","age","Appearances","Time Played","weight","height","player_id","position"]].copy()
+
+    general_stats_player=df_general_stats[df_general_stats["player_id"]==player_id_analizing].iloc[0]
+    stats_player=df_stats[df_stats["player_id"]==player_id_analizing].iloc[0]
+    player_position=general_stats_player["position"]
+    df_stats_position=df_stats[(df_stats["position"]==player_position)].copy()
+    #print(df_stats_position["general_position"])
+    param_ofensive=parameters[player_position]["ofensive"]
+    param_of_idioma=parameters[player_position]["ofensive es"]
+
+    param_of_idioma = [item.replace("\\n", "") for item in param_of_idioma]
+    param_defensive=parameters[player_position]["defensive"]
+    of_number=parameters[player_position]["of_number"]
+    param_def_id=parameters[player_position]["defensive es"]
+    param_def_id = [item.replace("\\n", "") for item in param_def_id]
+    param_ofensive1 = []
+    param_ofensive2 = []
+    min_array=[]
+    max_array=[]
+    player_array=[]
+    params_array=[]
+    all_params=param_ofensive+param_defensive   
+
+    def calculate_and_assign_percentiles(df, *column_lists):
+
+        columns = pd.Series(sum(column_lists, [])).unique().tolist()
+        
+        # Calcular los percentiles para las columnas 
+        for col in columns:
+            values = df[col].values  
+            percentiles = [
+                percentileofscore(values, x, kind='rank') 
+                for x in values
+            ]
+            
+            
+            df[col] = pd.Series(percentiles).round().astype(int).values
+        
+        return df
+    #print(df_stats_position.columns.tolist())
+    df_stats_percentile=calculate_and_assign_percentiles(df_stats_position, parameters[player_position]["defensive"], parameters[player_position]["ofensive"])
+    df_stats_percentile=df_stats_percentile[df_stats_percentile["player_id"]==player_id_analizing]
+
+
+    param_of1_id=[]
+    param_of2_id=[]
+    for i, param in enumerate(param_ofensive):
+        if of_number[i] == 1:
+            param_ofensive1.append(param)
+        elif of_number[i] == 2:
+            param_ofensive2.append(param)
+    for i,param in enumerate(param_of_idioma):
+        if of_number[i] == 1:
+            param_of1_id.append(param)
+        elif of_number[i] == 2:
+            param_of2_id.append(param)
+    if param_entry=="param_of1":
+        min_array=df_stats[param_ofensive1].min(axis=0)
+        max_array=df_stats[param_ofensive1].max(axis=0)
+        player_array=stats_player[param_ofensive1]
+        params_array=param_ofensive1
+        percentiles_player=df_stats_percentile[param_ofensive1].values.flatten().tolist()
+        param_en=param_of1_id
+        
+    elif param_entry=="param_of2":
+        min_array=df_stats[param_ofensive2].min(axis=0)
+        max_array=df_stats[param_ofensive2].max(axis=0)
+        player_array=stats_player[param_ofensive2]
+        params_array=param_ofensive2
+        percentiles_player=df_stats_percentile[param_ofensive2].values.flatten().tolist()
+        param_en=param_of2_id
+    elif param_entry=="param_def":
+        min_array=df_stats[param_defensive].min(axis=0)
+        max_array=df_stats[param_defensive].max(axis=0)
+        player_array=stats_player[param_defensive]
+        params_array=param_defensive
+        percentiles_player=df_stats_percentile[param_defensive].values.flatten().tolist()
+        param_en=param_def_id
+    else:
+        min_array=None
+        max_array=None
+        player_array=None
+        params_array=None
+        percentiles_player=None
+        param_en=None
+        
+    return min_array,max_array,player_array,params_array, df_stats,percentiles_player,param_en
+def get_player_ratings(PLAYER_POSITION,opta_filepath,parameters_file_,player_id_analizing,min_minutos):
+    
+    if not os.path.exists(opta_filepath):
+        print(f"El fichero {opta_filepath} no existe.")
+        return None
+    df_all_players=pd.read_excel(opta_filepath)
+    if player_id_analizing not in df_all_players["player_id"].values:
+        print("No se encuentra al jugador")
+        return None
+
+    
+    df_all_players=df_all_players[df_all_players["Time Played"]>min_minutos].copy()
+    if player_id_analizing not in df_all_players["player_id"].values:
+        print(f"El jugador ha jugado menos de {min_minutos} minutos.")
+        return None
+    df_position=df_all_players[df_all_players["position"]==PLAYER_POSITION].copy()
+    #CHANGE FORMULAS FOR CORRECT PATH
+    df_position=calculate_pizza_values(df_position,PLAYER_POSITION,f"{BASE_DIR}/report_gen_opta/formulas.xlsx")
+    percentages_file=f"{BASE_DIR}/report_gen_opta/datoswyscout/wyscout_positions_porcentajes.xlsx"
+    dict_excels={"Goalkeeper":"goalkeeper","Defender":"defender","Midfielder":"midfielder",
+                 "Forward":"forward"}
+
+    position_excel=dict_excels[PLAYER_POSITION]
+
+    excel_path=f"{BASE_DIR}/report_gen_opta/datoswyscout/variables_wyscout_{position_excel}.xlsx"
+
+    df_ponderations=pd.read_excel(excel_path)
+
+    df_ponderations = df_ponderations.rename(columns={0: "ofensive", "0.1": "defensive"})
+
+    df_ponderations = df_ponderations[~((df_ponderations["ofensive"] == 0) & (df_ponderations["defensive"] == 0))]
+
+    _, _, _, _,df_all_stats,_,_ = extract_arrays_wyscout_2(df_position,parameters_file_,player_id_analizing,"param_of1",min_minutos)
+
+    stats_player=df_all_stats[df_all_stats["player_id"]==player_id_analizing].iloc[0]
+    player_position=stats_player["position"]
+    df_stats_position=df_all_stats[(df_all_stats["position"]==player_position)].copy()
+
+    numeric_cols_pos = [col for col in df_stats_position.select_dtypes(include=['number']).columns if col != "player_id"]
+    # Apply Min-Max scaling to each numeric column
+    df_stats_position[numeric_cols_pos] = (df_stats_position[numeric_cols_pos] - df_stats_position[numeric_cols_pos].min()) / (df_stats_position[numeric_cols_pos].max() - df_stats_position[numeric_cols_pos].min())
+    #df_stats_position.to_excel("dfstatsposition.xlsx")
+    number_of_players_position=len(df_stats_position)
+
+    of_list = df_ponderations.loc[df_ponderations['ofensive'] != 0, 'team_id'].tolist()
+
+    of_stats=df_all_stats[of_list]
+
+    ponderaciones_OF=df_stats_position
+
+    def_list=df_ponderations.loc[df_ponderations['defensive'] != 0, 'team_id'].tolist()
+
+
+    def_stats=df_all_stats[def_list]
+
+    of_ponderations=df_ponderations.set_index("team_id")["ofensive"].to_dict()
+
+
+    cols_of=[col for col in df_stats_position.columns if col in of_ponderations]
+
+    of_weights=pd.Series({col: of_ponderations[col] for col in cols_of})
+
+    of_weights=of_weights/of_weights.sum()
+    #print(of_weights)
+    df_stats_position[cols_of] = df_stats_position[cols_of].fillna(0)
+    df_stats_position["OF_score"]=df_stats_position[cols_of].dot(of_weights)
+    min_score=df_stats_position["OF_score"].min()
+    max_score=df_stats_position["OF_score"].max()
+
+    if max_score == min_score:
+        
+        df_stats_position["OF_score"] = 0  # or 100, or any constant
+    else:
+        df_stats_position["OF_score"] = 100 * (df_stats_position["OF_score"] - min_score) / (max_score - min_score)
+    #df_stats_position["OF_score"]=100*(df_stats_position["OF_score"]-min_score)/(max_score - min_score)
+
+    #DEFENSIVE
+    def_ponderations=df_ponderations.set_index("team_id")["defensive"].to_dict()
+
+    cols_def=[col for col in df_stats_position.columns if col in def_ponderations]
+
+    def_weights=pd.Series({col: def_ponderations[col] for col in cols_def})
+
+    def_weights=def_weights/def_weights.sum()
+
+    df_stats_position["DEF_score"]=df_stats_position[cols_def].dot(def_weights)
+
+    min_score=df_stats_position["DEF_score"].min()
+    max_score=df_stats_position["DEF_score"].max()
+
+    if max_score == min_score:
+        df_stats_position["DEF_score"] = 0  # or 100, or any constant
+    else:
+        df_stats_position["DEF_score"] = 100 * (df_stats_position["DEF_score"] - min_score) / (max_score - min_score)
+    #df_stats_position["DEF_score"]=100*(df_stats_position["DEF_score"]-min_score)/(max_score - min_score)
+
+    #df_stats_position.to_excel("dfstatsposition.xlsx")
+    #hasta aqui vamos bien
+    def assign_letter(percentile):
+        if percentile > 75:
+            return "A"   
+        elif percentile > 50:
+            return "B"   
+        elif percentile > 25:
+            return "C"   
+        else:
+            return "D"  
+    
+    
+    df_stats_position["DEF_percentile"] = df_stats_position["DEF_score"].rank(pct=True) * 100
+    
+    df_stats_position["DEF_letter"] = df_stats_position["DEF_percentile"].apply(assign_letter)
+    
+    df_stats_position["OF_percentile"] = df_stats_position["OF_score"].rank(pct=True) * 100
+    
+    df_stats_position["OF_letter"] = df_stats_position["OF_percentile"].apply(assign_letter)
+
+    player_of_score=float(df_stats_position[df_stats_position["player_id"]==player_id_analizing]["OF_score"].iloc[0])
+    #print(player_of_score)
+
+    player_def_score=float(df_stats_position[df_stats_position["player_id"]==player_id_analizing]["DEF_score"].iloc[0])
+
+    player_of_letter=df_stats_position[df_stats_position["player_id"]==player_id_analizing]["OF_letter"].iloc[0]
+
+    player_def_letter=df_stats_position[df_stats_position["player_id"]==player_id_analizing]["DEF_letter"].iloc[0]
+
+    df_percentages=pd.read_excel(percentages_file)
+
+    df_percentages=df_percentages[["grupo","Defensivo","Ofensivo"]]
+
+    percentages_of=float(df_percentages[df_percentages["grupo"]==position_excel]["Ofensivo"].iloc[0])
+    percentages_def=float(df_percentages[df_percentages["grupo"]==position_excel]["Defensivo"].iloc[0])
+
+    df_stats_position["Full_score"]=(percentages_of/100)*df_stats_position["OF_score"]+(percentages_def/100)*df_stats_position["DEF_score"]
+    
+    df_stats_position["Full_percentile"] = df_stats_position["Full_score"].rank(pct=True) * 100
+    
+    df_stats_position["Full_letter"] = df_stats_position["Full_percentile"].apply(assign_letter)
+
+    df_stats_position["Rank_of"]=df_stats_position["OF_score"].rank(method="dense", ascending=False).astype(int)
+    df_stats_position["Rank_def"]=df_stats_position["DEF_score"].rank(method="dense", ascending=False).astype(int)
+    df_stats_position["Rank_full"]=df_stats_position["Full_score"].rank(method="dense", ascending=False).astype(int)
+    #df_stats_position.to_excel("RANKS_POSITION.xlsx",index=False)
+
+    player_full_score=float(df_stats_position[df_stats_position["player_id"]==player_id_analizing]["Full_score"].iloc[0])
+
+    player_full_letter=df_stats_position[df_stats_position["player_id"]==player_id_analizing]["Full_letter"].iloc[0]
+
+    df_stats_position["OF_rank"] = df_stats_position["OF_score"].rank(method='first', ascending=False).astype(int)
+    Rank_of=int(df_stats_position[df_stats_position["player_id"] == player_id_analizing]["OF_rank"].iloc[0])
+
+    df_stats_position["DEF_rank"] = df_stats_position["DEF_score"].rank(method='first', ascending=False).astype(int)
+    Rank_def=int(df_stats_position[df_stats_position["player_id"] == player_id_analizing]["DEF_rank"].iloc[0])
+
+    df_stats_position["Full_rank"] = df_stats_position["Full_score"].rank(method='first', ascending=False).astype(int)
+    Rank_full= int(df_stats_position[df_stats_position["player_id"] == player_id_analizing]["Full_rank"].iloc[0])
+    return player_of_letter,player_def_letter,player_full_letter,number_of_players_position,Rank_of,Rank_def,Rank_full
+
+def get_player_ratings_enhanced(PLAYER_POSITION, opta_filepath, parameters_file_, player_id_analizing, min_minutos):
+    """
+    Enhanced version that returns all 5 dimensions with Overall as average of all metrics
+    
+    CALCULATION METHODOLOGY:
+    1. OFFENSIVE: Weighted combination of attacking metrics (goals, assists, shots, key passes)
+    2. DEFENSIVE: Weighted combination of defensive metrics (tackles, interceptions, clearances)
+    3. TECHNICAL: Equal-weighted average of skill metrics (pass accuracy, dribbling success)
+    4. PHYSICAL: Equal-weighted average of athletic metrics (duels won, aerial duels)
+    5. OVERALL: Simple average of the above 4 dimensions
+    
+    Parameters:
+    -----------
+    PLAYER_POSITION : str
+        Player position (Goalkeeper, Defender, Midfielder, Forward)
+    opta_filepath : str
+        Path to the Opta Excel file with player statistics
+    parameters_file_ : str
+        Path to the parameters Excel file
+    player_id_analizing : int
+        Player ID to analyze
+    min_minutos : int
+        Minimum minutes played threshold
+    
+    Returns:
+    --------
+    tuple: (
+        player_of_letter, player_def_letter, player_tech_letter, player_phys_letter, player_full_letter,
+        number_of_players_position,
+        Rank_of, Rank_def, Rank_tech, Rank_phys, Rank_full,
+        of_percentile, def_percentile, tech_percentile, phys_percentile, full_percentile,
+        key_metrics_dict
+    )
+    """
+    
+    if not os.path.exists(opta_filepath):
+        logger.error("File not found: %s", opta_filepath)
+        return None
+    
+    df_all_players = pd.read_excel(opta_filepath)
+    
+    if player_id_analizing not in df_all_players["player_id"].values:
+        print("No se encuentra al jugador")
+        return None
+    
+    df_all_players = df_all_players[df_all_players["Time Played"] > min_minutos].copy()
+    
+    if player_id_analizing not in df_all_players["player_id"].values:
+        logger.warning("Player has less than %d minutes.", min_minutos)
+        return None
+    
+    df_position = df_all_players[df_all_players["position"] == PLAYER_POSITION].copy()
+    
+    # Calculate derived metrics using formulas
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    df_position = calculate_pizza_values(df_position, PLAYER_POSITION, f"{BASE_DIR}/report_gen_opta/formulas.xlsx")
+    
+    # Get position-specific Excel file for weights
+    dict_excels = {"Goalkeeper": "goalkeeper", "Defender": "defender", 
+                   "Midfielder": "midfielder", "Forward": "forward"}
+    position_excel = dict_excels[PLAYER_POSITION]
+    
+    excel_path = f"{BASE_DIR}/report_gen_opta/datoswyscout/variables_wyscout_{position_excel}.xlsx"
+    df_ponderations = pd.read_excel(excel_path)
+    df_ponderations = df_ponderations.rename(columns={0: "ofensive", "0.1": "defensive"})
+    df_ponderations = df_ponderations[~((df_ponderations["ofensive"] == 0) & (df_ponderations["defensive"] == 0))]
+    
+    # Get all stats using existing helper function
+    _, _, _, _, df_all_stats, _, _ = extract_arrays_wyscout_2(
+        df_position, parameters_file_, player_id_analizing, "param_of1", min_minutos
+    )
+    
+    stats_player = df_all_stats[df_all_stats["player_id"] == player_id_analizing].iloc[0]
+    df_stats_position = df_all_stats[df_all_stats["position"] == PLAYER_POSITION].copy()
+    
+    # Normalize all numeric columns to 0-1 scale
+    numeric_cols_pos = [col for col in df_stats_position.select_dtypes(include=['number']).columns 
+                        if col != "player_id"]
+    df_stats_position[numeric_cols_pos] = (
+        (df_stats_position[numeric_cols_pos] - df_stats_position[numeric_cols_pos].min()) / 
+        (df_stats_position[numeric_cols_pos].max() - df_stats_position[numeric_cols_pos].min())
+    )
+    
+    number_of_players_position = len(df_stats_position)
+    
+    # ============= OFFENSIVE SCORE =============
+    of_list = df_ponderations.loc[df_ponderations['ofensive'] != 0, 'team_id'].tolist()
+    of_ponderations = df_ponderations.set_index("team_id")["ofensive"].to_dict()
+    cols_of = [col for col in df_stats_position.columns if col in of_ponderations]
+    of_weights = pd.Series({col: of_ponderations[col] for col in cols_of})
+    of_weights = of_weights / of_weights.sum()
+    
+    def _normalize_score(raw, default=0):
+        min_s, max_s = raw.min(), raw.max()
+        if max_s == min_s:
+            return pd.Series(default, index=raw.index, dtype=float)
+        return 100 * (raw - min_s) / (max_s - min_s)
+
+    def assign_letter(percentile):
+        if percentile > 75:
+            return "A"
+        elif percentile > 50:
+            return "B"
+        elif percentile > 25:
+            return "C"
+        else:
+            return "D"
+
+    of_score = _normalize_score(df_stats_position[cols_of].fillna(0).dot(of_weights), default=0)
+
+    # ============= DEFENSIVE SCORE =============
+    def_ponderations = df_ponderations.set_index("team_id")["defensive"].to_dict()
+    cols_def = [col for col in df_stats_position.columns if col in def_ponderations]
+    def_weights = pd.Series({col: def_ponderations[col] for col in cols_def})
+    def_weights = def_weights / def_weights.sum()
+    def_score = _normalize_score(df_stats_position[cols_def].fillna(0).dot(def_weights), default=0)
+
+    # ============= TECHNICAL SCORE =============
+    technical_metrics = {
+        "Goalkeeper": ["Precisión pases, %", "Precisión pases cortos, %", "Precisión pases largos, %"],
+        "Defender": ["Precisión pases, %", "Precisión pases en la zona rival, %", "Precisión pases largos, %",
+                     "Regates realizados, %"],
+        "Midfielder": ["Precisión pases, %", "Precisión pases en la zona rival, %", "Regates realizados, %",
+                       "Jugadas claves/90"],
+        "Forward": ["Precisión pases, %", "Precisión pases en la zona rival, %", "Regates realizados, %",
+                    "Tiros a la portería, %", "Jugadas claves/90"]
+    }
+    tech_cols = [col for col in technical_metrics[PLAYER_POSITION] if col in df_stats_position.columns]
+    if tech_cols:
+        tech_weights = pd.Series({col: 1.0 for col in tech_cols})
+        tech_weights = tech_weights / tech_weights.sum()
+        tech_score = _normalize_score(df_stats_position[tech_cols].fillna(0).dot(tech_weights), default=50)
+    else:
+        tech_score = pd.Series(50.0, index=df_stats_position.index)
+
+    # ============= PHYSICAL SCORE =============
+    physical_metrics = {
+        "Goalkeeper": ["Duelos ganados, %", "Duelos aéreos ganados, %"],
+        "Defender": ["Duelos ganados, %", "Duelos aéreos ganados, %", "Duelos/90"],
+        "Midfielder": ["Duelos ganados, %", "Duelos aéreos ganados, %", "Duelos/90"],
+        "Forward": ["Duelos ganados, %", "Duelos aéreos ganados, %", "Duelos/90"]
+    }
+    phys_cols = [col for col in physical_metrics[PLAYER_POSITION] if col in df_stats_position.columns]
+    if phys_cols:
+        phys_weights = pd.Series({col: 1.0 for col in phys_cols})
+        phys_weights = phys_weights / phys_weights.sum()
+        phys_score = _normalize_score(df_stats_position[phys_cols].fillna(0).dot(phys_weights), default=50)
+    else:
+        phys_score = pd.Series(50.0, index=df_stats_position.index)
+
+    # ============= OVERALL SCORE =============
+    full_score = (of_score + def_score + tech_score + phys_score) / 4
+
+    # ============= PERCENTILES =============
+    of_pct   = of_score.rank(pct=True) * 100
+    def_pct  = def_score.rank(pct=True) * 100
+    tech_pct = tech_score.rank(pct=True) * 100
+    phys_pct = phys_score.rank(pct=True) * 100
+    full_pct = full_score.rank(pct=True) * 100
+
+    # ============= BATCH CONCAT all 20 new columns at once =============
+    new_score_cols = pd.DataFrame({
+        "OF_score": of_score,
+        "DEF_score": def_score,
+        "TECH_score": tech_score,
+        "PHYS_score": phys_score,
+        "Full_score": full_score,
+        "OF_percentile": of_pct,
+        "DEF_percentile": def_pct,
+        "TECH_percentile": tech_pct,
+        "PHYS_percentile": phys_pct,
+        "Full_percentile": full_pct,
+        "OF_letter":   of_pct.apply(assign_letter),
+        "DEF_letter":  def_pct.apply(assign_letter),
+        "TECH_letter": tech_pct.apply(assign_letter),
+        "PHYS_letter": phys_pct.apply(assign_letter),
+        "Full_letter": full_pct.apply(assign_letter),
+        "OF_rank":   of_score.rank(method='first', ascending=False).astype(int),
+        "DEF_rank":  def_score.rank(method='first', ascending=False).astype(int),
+        "TECH_rank": tech_score.rank(method='first', ascending=False).astype(int),
+        "PHYS_rank": phys_score.rank(method='first', ascending=False).astype(int),
+        "Full_rank": full_score.rank(method='first', ascending=False).astype(int),
+    }, index=df_stats_position.index)
+    df_stats_position = pd.concat([df_stats_position, new_score_cols], axis=1)
+    
+    # Get player-specific values
+    player_row = df_stats_position[df_stats_position["player_id"] == player_id_analizing].iloc[0]
+    
+    player_of_letter = player_row["OF_letter"]
+    player_def_letter = player_row["DEF_letter"]
+    player_tech_letter = player_row["TECH_letter"]
+    player_phys_letter = player_row["PHYS_letter"]
+    player_full_letter = player_row["Full_letter"]
+    
+    Rank_of = int(player_row["OF_rank"])
+    Rank_def = int(player_row["DEF_rank"])
+    Rank_tech = int(player_row["TECH_rank"])
+    Rank_phys = int(player_row["PHYS_rank"])
+    Rank_full = int(player_row["Full_rank"])
+    
+    of_percentile = round(player_row["OF_percentile"])
+    def_percentile = round(player_row["DEF_percentile"])
+    tech_percentile = round(player_row["TECH_percentile"])
+    phys_percentile = round(player_row["PHYS_percentile"])
+    full_percentile = round(player_row["Full_percentile"])
+    
+    # ============= KEY METRICS EXTRACTION =============
+    player_raw = df_all_stats[df_all_stats["player_id"] == player_id_analizing].iloc[0]
+    
+    key_metrics = {}
+    
+    if PLAYER_POSITION == "Forward":
+        key_metrics = {
+            "Goles": round(player_raw.get("Goles", 0), 1) if "Goles" in player_raw else "N/A",
+            "Asistencias": round(player_raw.get("Asistencias", 0), 1) if "Asistencias" in player_raw else "N/A",
+            "Remates/90": round(player_raw.get("Remates/90", 0), 2) if "Remates/90" in player_raw else "N/A",
+            "Tiros a portería %": f"{round(player_raw.get('Tiros a la portería, %', 0), 1)}%" if "Tiros a la portería, %" in player_raw else "N/A",
+            "Duelos ganados %": f"{round(player_raw.get('Duelos ganados, %', 0), 1)}%" if "Duelos ganados, %" in player_raw else "N/A"
+        }
+    elif PLAYER_POSITION == "Midfielder":
+        key_metrics = {
+            "Pases/90": round(player_raw.get("Pases/90", 0), 1) if "Pases/90" in player_raw else "N/A",
+            "Precisión pases %": f"{round(player_raw.get('Precisión pases, %', 0), 1)}%" if "Precisión pases, %" in player_raw else "N/A",
+            "Pases progresivos/90": round(player_raw.get("Pases progresivos/90", 0), 2) if "Pases progresivos/90" in player_raw else "N/A",
+            "Jugadas claves/90": round(player_raw.get("Jugadas claves/90", 0), 2) if "Jugadas claves/90" in player_raw else "N/A",
+            "Recuperaciones/90": round(player_raw.get("Recuperaciones/90", 0), 2) if "Recuperaciones/90" in player_raw else "N/A"
+        }
+    elif PLAYER_POSITION == "Defender":
+        key_metrics = {
+            "Duelos ganados %": f"{round(player_raw.get('Duelos ganados, %', 0), 1)}%" if "Duelos ganados, %" in player_raw else "N/A",
+            "Despejes/90": round(player_raw.get("Despejes/90", 0), 2) if "Despejes/90" in player_raw else "N/A",
+            "Interceptaciones/90": round(player_raw.get("Interceptaciones/90", 0), 2) if "Interceptaciones/90" in player_raw else "N/A",
+            "Precisión pases %": f"{round(player_raw.get('Precisión pases, %', 0), 1)}%" if "Precisión pases, %" in player_raw else "N/A",
+            "Recuperaciones/90": round(player_raw.get("Recuperaciones/90", 0), 2) if "Recuperaciones/90" in player_raw else "N/A"
+        }
+    elif PLAYER_POSITION == "Goalkeeper":
+        key_metrics = {
+            "Paradas/90": round(player_raw.get("Paradas /90", 0), 2) if "Paradas /90" in player_raw else "N/A",
+            "Porterías imbatidas": round(player_raw.get("Porterías imbatidas /90", 0), 2) if "Porterías imbatidas /90" in player_raw else "N/A",
+            "Goles concedidos": round(player_raw.get("Goles concedidos", 0), 1) if "Goles concedidos" in player_raw else "N/A",
+            "Precisión pases %": f"{round(player_raw.get('Precisión pases, %', 0), 1)}%" if "Precisión pases, %" in player_raw else "N/A",
+            "Duelos aéreos ganados %": f"{round(player_raw.get('Duelos aéreos ganados, %', 0), 1)}%" if "Duelos aéreos ganados, %" in player_raw else "N/A"
+        }
+    
+    return (
+        player_of_letter, player_def_letter, player_tech_letter, player_phys_letter, player_full_letter,
+        number_of_players_position,
+        Rank_of, Rank_def, Rank_tech, Rank_phys, Rank_full,
+        of_percentile, def_percentile, tech_percentile, phys_percentile, full_percentile,
+        key_metrics
+    )
+
+import os
+import pandas as pd
+import numpy as np
+import re
+import unicodedata
+import difflib
+from scipy.stats import percentileofscore
+
+def get_player_ratings_enhanced_2(PLAYER_POSITION, opta_filepath, skillcorner_filepath, parameters_file_, player_id_analizing, player_name, min_minutos):
+    """
+    Versión mejorada que integra métricas físicas de SkillCorner mediante Fuzzy Matching.
+    """
+    
+    # --- 1. FUNCIONES INTERNAS DE LIMPIEZA Y BÚSQUEDA ---
+    def clean_extreme(text):
+        if pd.isna(text): return ""
+        text = str(text)
+        replacements = {
+            'Ã¸': 'O', 'Ã¤': 'A', 'Ã­': 'I', 'Ã©': 'E', 'Ã¡': 'A', 
+            'Ã³': 'O', 'Ãº': 'U', 'Ã±': 'N', 'Ã': 'A', 'Â': '', 
+            'A¤': 'A', 'A©': 'E', 'A­': 'I', 'A±': 'N', 'Ã¼': 'U'
+        }
+        for bad, good in replacements.items():
+            text = text.replace(bad, good)
+        text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
+        text = text.upper()
+        text = re.sub(r'[^A-Z\s]', ' ', text)
+        return " ".join(text.split())
+
+    def find_best_name(target_name, options):
+        target_clean = clean_extreme(target_name)
+        for opt in options:
+            if target_clean in clean_extreme(opt) or clean_extreme(opt) in target_clean:
+                return opt
+        clean_options = [clean_extreme(o) for o in options]
+        matches = difflib.get_close_matches(target_clean, clean_options, n=1, cutoff=0.7)
+        return options[clean_options.index(matches[0])] if matches else None
+
+    def assign_letter(percentile):
+        if percentile > 75: return "A"
+        elif percentile > 50: return "B"
+        elif percentile > 25: return "C"
+        else: return "D"
+
+    def _normalize_score(raw, default=0):
+        min_s, max_s = raw.min(), raw.max()
+        if max_s == min_s:
+            return pd.Series(default, index=raw.index, dtype=float)
+        return 100 * (raw - min_s) / (max_s - min_s)
+
+    # --- 2. CARGA DE DATOS OPTA ---
+    if not os.path.exists(opta_filepath):
+        return None
+    
+    df_all_players = pd.read_excel(opta_filepath)
+    df_all_players = df_all_players[df_all_players["Time Played"] > min_minutos].copy()
+    
+    if player_id_analizing not in df_all_players["player_id"].values:
+        return None
+    
+    df_position = df_all_players[df_all_players["position"] == PLAYER_POSITION].copy()
+    
+    # Cálculo de valores derivados (Pizza Plot)
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    # Nota: Asegúrate de que calculate_pizza_values esté importada o definida en tu util
+    #from util import calculate_pizza_values, extract_arrays_wyscout_2 
+    
+    df_position = calculate_pizza_values(df_position, PLAYER_POSITION, f"{BASE_DIR}/report_gen_opta/formulas.xlsx")
+    
+    # Carga de Ponderaciones/Pesos
+    dict_excels = {"Goalkeeper": "goalkeeper", "Defender": "defender", "Midfielder": "midfielder", "Forward": "forward"}
+    excel_path = f"{BASE_DIR}/report_gen_opta/datoswyscout/variables_wyscout_{dict_excels[PLAYER_POSITION]}.xlsx"
+    df_ponderations = pd.read_excel(excel_path)
+    df_ponderations = df_ponderations.rename(columns={0: "ofensive", "0.1": "defensive"})
+    df_ponderations = df_ponderations[~((df_ponderations["ofensive"] == 0) & (df_ponderations["defensive"] == 0))]
+
+    _, _, _, _, df_all_stats, _, _ = extract_arrays_wyscout_2(df_position, parameters_file_, player_id_analizing, "param_of1", min_minutos)
+    df_stats_position = df_all_stats[df_all_stats["position"] == PLAYER_POSITION].copy()
+
+    # --- 3. LÓGICA SKILLCORNER (PHYSICAL SCORE) ---
+    skill_phys_score = None
+    csv_skill = f"{skillcorner_filepath}/SkillCorner-2026-03-30.csv"
+    
+    if os.path.exists(csv_skill):
+        try:
+            df_skill = pd.read_csv(csv_skill, delimiter=";", encoding="utf-8-sig")
+        except:
+            df_skill = pd.read_csv(csv_skill, delimiter=";", encoding="latin1")
+        
+        col_name_skill = "Player" if "Player" in df_skill.columns else "Short Name"
+        real_name_skill = find_best_name(player_name, df_skill[col_name_skill].unique())
+
+        if real_name_skill:
+            phys_cols_skill = [
+                "PSV-99", "Running Distance P90", "HSR Distance P90",
+                "Sprint Distance P90", "HI Count P90", "Medium Acceleration Count P90",
+                "High Acceleration Count P90", "Medium Deceleration Count P90",
+                "High Deceleration Count P90", "Explosive Acceleration to Sprint Count P90"
+            ]
+            
+            # Calculamos un score basado en el promedio de percentiles de SkillCorner
+            scores_list = []
+            df_player_skill = df_skill[df_skill[col_name_skill] == real_name_skill]
+            
+            for col in phys_cols_skill:
+                if col in df_skill.columns:
+                    pop = pd.to_numeric(df_skill[col], errors='coerce').dropna().values
+                    val = pd.to_numeric(df_player_skill[col].iloc[0], errors='coerce')
+                    if not pd.isna(val) and len(pop) > 0:
+                        scores_list.append(percentileofscore(pop, val, kind='rank'))
+            
+            if scores_list:
+                skill_phys_score = np.mean(scores_list)
+
+    # --- 4. CÁLCULO DE DIMENSIONES (OF, DEF, TECH) ---
+    # Offensive
+    of_ponderations = df_ponderations.set_index("team_id")["ofensive"].to_dict()
+    cols_of = [c for c in df_stats_position.columns if c in of_ponderations]
+    of_weights = pd.Series({c: of_ponderations[c] for c in cols_of}); of_weights /= of_weights.sum()
+    of_score = _normalize_score(df_stats_position[cols_of].fillna(0).dot(of_weights))
+
+    # Defensive
+    def_ponderations = df_ponderations.set_index("team_id")["defensive"].to_dict()
+    cols_def = [c for c in df_stats_position.columns if c in def_ponderations]
+    def_weights = pd.Series({c: def_ponderations[c] for c in cols_def}); def_weights /= def_weights.sum()
+    def_score = _normalize_score(df_stats_position[cols_def].fillna(0).dot(def_weights))
+
+    # Technical
+    technical_metrics = {
+        "Goalkeeper": ["Precisión pases, %", "Precisión pases cortos, %", "Precisión pases largos, %"],
+        "Defender": ["Precisión pases, %", "Precisión pases en la zona rival, %", "Precisión pases largos, %", "Regates realizados, %"],
+        "Midfielder": ["Precisión pases, %", "Precisión pases en la zona rival, %", "Regates realizados, %", "Jugadas claves/90"],
+        "Forward": ["Precisión pases, %", "Precisión pases en la zona rival, %", "Regates realizados, %", "Tiros a la portería, %", "Jugadas claves/90"]
+    }
+    tech_cols = [c for c in technical_metrics[PLAYER_POSITION] if c in df_stats_position.columns]
+    tech_score = _normalize_score(df_stats_position[tech_cols].mean(axis=1)) if tech_cols else pd.Series(50.0, index=df_stats_position.index)
+
+    # Physical (Prioriza SkillCorner)
+    if skill_phys_score is not None:
+        # Creamos una serie base y asignamos el valor de SkillCorner a la jugadora analizada
+        phys_score = pd.Series(40.0, index=df_stats_position.index) # Default bajo para resaltar a la analizada
+        phys_score.loc[df_stats_position["player_id"] == player_id_analizing] = skill_phys_score
+    else:
+        # Fallback a métricas Opta
+        physical_metrics = {"Goalkeeper": ["Duelos ganados, %", "Duelos aéreos ganados, %"], "Defender": ["Duelos ganados, %", "Duelos aéreos ganados, %", "Duelos/90"], "Midfielder": ["Duelos ganados, %", "Duelos aéreos ganados, %", "Duelos/90"], "Forward": ["Duelos ganados, %", "Duelos aéreos ganados, %", "Duelos/90"]}
+        phys_cols = [c for c in physical_metrics[PLAYER_POSITION] if c in df_stats_position.columns]
+        phys_score = _normalize_score(df_stats_position[phys_cols].mean(axis=1)) if phys_cols else pd.Series(50.0, index=df_stats_position.index)
+
+    # --- 5. OVERALL Y RESULTADOS FINALES ---
+    full_score = (of_score + def_score + tech_score + phys_score) / 4
+    
+    # Rankings y Percentiles
+    res = pd.DataFrame(index=df_stats_position.index)
+    for name, score in [("OF", of_score), ("DEF", def_score), ("TECH", tech_score), ("PHYS", phys_score), ("Full", full_score)]:
+        res[f"{name}_percentile"] = score.rank(pct=True) * 100
+        res[f"{name}_rank"] = score.rank(ascending=False, method='first').astype(int)
+        res[f"{name}_letter"] = res[f"{name}_percentile"].apply(assign_letter)
+
+    player_row = res.loc[df_stats_position[df_stats_position["player_id"] == player_id_analizing].index[0]]
+    
+    # Key Metrics
+    player_raw = df_all_stats[df_all_stats["player_id"] == player_id_analizing].iloc[0]
+    key_metrics = {}
+    # (Aquí puedes mantener tu lógica de key_metrics original)
+    if PLAYER_POSITION == "Forward":
+        key_metrics = {"Goles": round(player_raw.get("Goles", 0), 1), "Asistencias": round(player_raw.get("Asistencias", 0), 1), "Remates/90": round(player_raw.get("Remates/90", 0), 2)}
+    elif PLAYER_POSITION == "Midfielder":
+        key_metrics = {"Pases/90": round(player_raw.get("Pases/90", 0), 1), "Precisión pases %": f"{round(player_raw.get('Precisión pases, %', 0), 1)}%", "Jugadas claves/90": round(player_raw.get("Jugadas claves/90", 0), 2)}
+    
+    # Si hubo SkillCorner, añadir una métrica física top a las Key Metrics
+    if skill_phys_score is not None:
+        key_metrics["Sprint P90 (SC)"] = f"{round(df_player_skill['Sprint Distance P90'].iloc[0], 1)}m"
+
+    return (
+        player_row["OF_letter"], player_row["DEF_letter"], player_row["TECH_letter"], player_row["PHYS_letter"], player_row["Full_letter"],
+        len(df_stats_position),
+        int(player_row["OF_rank"]), int(player_row["DEF_rank"]), int(player_row["TECH_rank"]), int(player_row["PHYS_rank"]), int(player_row["Full_rank"]),
+        round(player_row["OF_percentile"]), round(player_row["DEF_percentile"]), round(player_row["TECH_percentile"]), round(player_row["PHYS_percentile"]), round(player_row["Full_percentile"]),
+        key_metrics
+    )
+
+    #return player_of_score,player_of_letter,player_def_score,player_def_letter,player_full_score,player_full_letter,number_of_players_position,Rank_of,Rank_def,Rank_full
+#get_player_ratings("Goalkeeper","/Users/julieta/Desktop/APP_Generic_Femeni/LigaF_opta_2024.xlsx","/Users/julieta/Desktop/APP_Generic_Femeni/report_gen_opta/parameters.xlsx",492096,500)

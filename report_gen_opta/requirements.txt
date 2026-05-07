@@ -1,0 +1,85 @@
+aiofiles==24.1.0
+aiohappyeyeballs==2.6.1
+aiohttp==3.12.13
+aiosignal==1.4.0
+annotated-types==0.7.0
+anyio==4.9.0
+async-timeout==5.0.1
+attrs==25.3.0
+beautifulsoup4 @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_94rx5n7wo9/croot/beautifulsoup4-split_1718029832430/work
+boto3==1.39.4
+botocore==1.39.4
+Bottleneck @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_55txi4fy1u/croot/bottleneck_1731058642212/work
+Brotli @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_f7i0oxypt6/croot/brotli-split_1736182464088/work
+certifi==2025.7.9
+charset-normalizer==3.4.2
+click==8.2.1
+ClusterShell==1.9.3
+contourpy @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_2cvjf0v4ux/croot/contourpy_1732540055997/work
+cycler @ file:///tmp/build/80754af9/cycler_1637851556182/work
+defusedxml==0.7.1
+distro==1.9.0
+et_xmlfile==2.0.0
+exceptiongroup==1.3.0
+fitrequest==1.4.3
+fonttools @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_ce1jt_55vl/croot/fonttools_1737039388732/work
+frozenlist==1.7.0
+h11==0.16.0
+highlight-text==0.2
+httpcore==1.0.9
+httpx==0.28.1
+idna==3.10
+Jinja2==3.1.6
+jiter==0.10.0
+jmespath==1.0.1
+jsonpath-ng==1.7.0
+kiwisolver @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_cc2l_z_0ri/croot/kiwisolver_1737039586949/work
+makefun==1.16.0
+markdown-it-py==3.0.0
+MarkupSafe==3.0.2
+matplotlib==3.10.0
+mdurl==0.1.2
+mplsoccer==1.5.0
+multidict==6.6.3
+numexpr @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_b3kvvt6tc6/croot/numexpr_1730215947700/work
+numpy @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_a51i_mbs7m/croot/numpy_and_numpy_base_1708638620867/work/dist/numpy-1.26.4-cp310-cp310-macosx_11_0_arm64.whl#sha256=c4b11b3c4d4fdb810039503fe01f311ade06cd1d675fcd6d208800a393f19b69
+openai==0.28.0
+openpyxl==3.1.5
+orjson==3.10.18
+packaging @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_a6_qk3qyg7/croot/packaging_1734472142254/work
+pandas @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_4aifrweohv/croot/pandas_1732735109535/work/dist/pandas-2.2.3-cp310-cp310-macosx_11_0_arm64.whl#sha256=6c5bbde94d3ac89a919939bdecfabca704888cdaf6251a6b101db7024fed27ab
+pillow @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_bfoqpm49mx/croot/pillow_1744613079607/work
+ply==3.11
+progress==1.6.1
+propcache==0.3.2
+pydantic==2.11.7
+pydantic-settings==2.10.1
+pydantic_core==2.33.2
+Pygments==2.19.2
+pyparsing @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_65qfw6vkxg/croot/pyparsing_1731445528142/work
+python-dateutil @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_66ud1l42_h/croot/python-dateutil_1716495741162/work
+python-dotenv==1.1.1
+pytz @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_a4b76c83ik/croot/pytz_1713974318928/work
+PyYAML==6.0.2
+reportlab @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_01j_8e0xtn/croot/reportlab_1737040055023/work
+requests==2.32.4
+rich==14.0.0
+s3transfer==0.13.0
+scipy @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_567ogtwk2r/croot/scipy_1747238053926/work/dist/scipy-1.15.3-cp310-cp310-macosx_11_0_arm64.whl#sha256=ed86b007ae3bad79c186ffea6c8ed3540630844b0709284a36e45885c7f1650b
+seaborn==0.13.2
+shellingham==1.5.4
+six @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_03myqm7p6o/croot/six_1744271511946/work
+skillcorner==2.6.8
+sniffio==1.3.1
+soupsieve @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_9798xzs_03/croot/soupsieve_1696347567192/work
+StrEnum==0.4.15
+tenacity==9.1.2
+tornado @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_63s3osc0_1/croot/tornado_1748956943583/work
+tqdm==4.67.1
+typer==0.16.0
+typing-inspection==0.4.1
+typing_extensions==4.14.1
+tzdata @ file:///croot/python-tzdata_1746123641790/work
+unicodedata2 @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_b99hn8t9lq/croot/unicodedata2_1736541774279/work
+urllib3==2.5.0
+yarl==1.20.1

@@ -1,0 +1,1743 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Mar 24 12:55:39 2025
+
+@author: julieta
+"""
+import pandas as pd
+import numpy as np
+import json
+from mplsoccer import Radar, FontManager, grid
+import matplotlib.pyplot as plt
+from bs4 import BeautifulSoup
+from urllib.request import urlopen
+from PIL import Image
+from mplsoccer import PyPizza, add_image, FontManager
+
+from highlight_text import fig_text
+from matplotlib.lines import Line2D
+from scipy.stats import percentileofscore
+
+import os
+import math
+from reportlab.platypus import Paragraph, Image, SimpleDocTemplate, Spacer, Frame
+from reportlab.platypus import PageTemplate, BaseDocTemplate, PageBreak, FrameBreak
+from reportlab.platypus import Flowable
+from reportlab.pdfgen.canvas import Canvas
+from reportlab.lib.pagesizes import letter, landscape
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT  
+from reportlab.platypus import KeepInFrame
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import Preformatted
+# Si queremos tablas...
+from reportlab.platypus import Table, TableStyle
+# Importamos clase de hoja de estilo de ejemplos
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import KeepTogether
+
+# Se importa el tamaño de la hoja.
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+
+# Y los colores.
+from reportlab.lib import colors
+from reportlab.pdfgen import canvas
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.colors import HexColor
+from reportlab.lib.units import inch
+from reportlab.lib.units import cm
+from reportlab.graphics.shapes import Drawing, Rect, String
+from reportlab.graphics import renderPDF
+from report_gen_opta.PizzaWyscout2RFEF import pizzaplot_player
+from report_gen_opta.Pizzaplot_Opta import pizzaplot_player_opta
+from report_gen_opta.IntentoArrays import extract_arrays_wyscout, extract_arrays_physical
+import time
+from PIL import Image as PILImage
+import io
+from report_gen_opta.TryGraficas2D import graficas_2D
+from reportlab.platypus import KeepInFrame
+#from Notas_tacticas import notas_tacticas
+from report_gen_opta.IntentoArrays_Opta import extract_arrays_wyscout,notas_tacticas
+from report_gen_opta.Notas_Skillcorner import notas_fisicas
+from report_gen_opta.PizzaPhysical import pizzaplot_phys
+from colorsys import rgb_to_hls
+from reportlab.platypus.tableofcontents import TableOfContents
+from reportlab.platypus import NextPageTemplate
+from report_gen_opta.Arrays_ChatOpta import extract_arrays_wyscout2
+from report_gen_opta.ChatTextReport import create_chat_log, chat
+import time
+import os
+import shutil
+import argparse
+
+import warnings
+import pandas as pd
+import os
+import tempfile
+from pathlib import Path
+import re
+
+# Ignorar PerformanceWarning de pandas
+warnings.simplefilter(action="ignore", category=pd.errors.PerformanceWarning)
+BASE_DIR = os.path.dirname(os.path.dirname(__file__)) 
+current_l="Liga F"
+current_season="2024/25"
+def find_latest_image(folder_path):
+    """
+    Finds the most recently added image (jpeg, jpg, png) in the given folder.
+        
+    Parameters:
+        folder_path (str): Path to the folder to search in.
+
+    Returns:
+        str: Full path to the latest image, or None if no image found.
+    """
+    # Validate the folder path
+    folder = Path(folder_path)
+    if not folder.is_dir():
+        raise ValueError(f"The path '{folder_path}' is not a valid directory.")
+
+    # Allowed extensions
+    extensions = (".jpeg", ".jpg", ".png")
+
+    # List all matching files
+    image_files = [file for file in folder.iterdir() if file.suffix.lower() in extensions]
+
+    if not image_files:
+        return None  # No images found
+
+    # Find the latest by modification time
+    latest_image = max(image_files, key=lambda x: x.stat().st_mtime)
+    return str(latest_image)
+
+def clean_text_for_paragraph(text):
+    # Keep only allowed tags <b>, <i>, <br/>
+    # Replace all other angle brackets to avoid breaking Paragraph
+    text = re.sub(r"</?(?!b|i|br/)[^>]*>", "", text)
+
+    # Fix broken <b> tags like 0.65&lt;/b
+    text = text.replace("&lt;/b", "</b>").replace("&lt;/i", "</i>")
+
+    # Balance <b> and <i> tags
+    for tag in ["b", "i"]:
+        open_tag_count = text.count(f"<{tag}>")
+        close_tag_count = text.count(f"</{tag}>")
+        if open_tag_count > close_tag_count:
+            text += f"</{tag}>" * (open_tag_count - close_tag_count)
+        elif close_tag_count > open_tag_count:
+            text = re.sub(f"</{tag}>", "", close_tag_count - open_tag_count)
+
+    # Replace stray & with &amp; (but keep &lt; and &gt; safe)
+    text = text.replace("&", "&amp;").replace("&amp;lt;", "&lt;").replace("&amp;gt;", "&gt;")
+
+    return text
+
+
+def calculate_pizza_values(df_position,position,formulas_filepath):
+    #formulas=pd.read_excel("/Users/julieta/Desktop/formulas.xlsx",sheet_name=player_position)
+    formulas=pd.read_excel(formulas_filepath,sheet_name=position)
+    
+    def is_convertible_to_numeric(series):
+        # Try converting, return True if any non-NaN result (means convertible)
+        return not pd.to_numeric(series, errors='coerce').isna().all()
+
+    for col in df_position.columns:
+        if is_convertible_to_numeric(df_position[col]):
+            df_position[col] = pd.to_numeric(df_position[col], errors='coerce')
+            
+            # --- SOLUCIÓN AQUÍ ---
+            # Si la columna es de las que deben ser 0 si están vacías:
+            columnas_a_cero = ["Goals", "Goles", "Assists", "Penalty Goals", "Goles/90"] 
+            
+            if col in columnas_a_cero:
+                df_position[col] = df_position[col].fillna(0)
+            else:
+                # Para el resto, si quieres mantener la mediana:
+                df_position[col] = df_position[col].fillna(df_position[col].median())
+        
+    for _, row in formulas.iterrows():
+        formula = row['formula']
+        variable = row['variable_get']
+
+        # Find all columns used in the formula (assuming they are written without df[])
+        cols_in_formula = re.findall(r"'(.*?)'", formula)  # look for 'Duels won', 'Duels', etc.
+
+        # Convert those columns to numeric safely
+        for col in cols_in_formula:
+            df_position[col] = pd.to_numeric(df_position[col], errors='coerce')
+            df_position[col] = df_position[col].fillna(df_position[col].median())
+
+            # Replace column name in formula with df["col"]
+            formula = formula.replace(f"'{col}'", f'df_position["{col}"]')
+
+        # Evaluate the formula
+        try:
+            df_position[variable] = eval(formula)
+            #print(f"Successfully calculated {variable}")
+        except Exception as e:
+            print(f"Error calculating {variable}: {e}")
+            print("Formula:", formula)
+            print("Column types:", df_position[cols_in_formula].dtypes)
+            
+    return df_position
+
+def create_report(player_id_analizing,opta_filepath,parameters_file,min_minutes,color_selection="#FFFFFF",summary=0,current_league=current_l,season="2024/25"):
+    class MyDocTemplate(BaseDocTemplate):
+        def __init__(self, filename, **kwargs):
+            super().__init__(filename, **kwargs)
+
+            # Define frame
+            frame = Frame(self.leftMargin, self.bottomMargin, self.width, self.height, id='normal')
+
+            # Página normal con fondo
+            main_template = PageTemplate(id='main', frames=frame, onPage=add_background)
+
+            # Si quieres una portada distinta, define otra
+            front_template = PageTemplate(id='front', frames=frame, onPage=create_front_page)
+
+            # Agrega las plantillas que vas a usar
+            self.addPageTemplates([front_template, main_template])
+
+            # Table of contents
+            self.toc = TableOfContents()
+            self.toc.levelStyles = [
+                ParagraphStyle(fontName='Helvetica', fontSize=14, name='TOCHeading1', leftIndent=20, firstLineIndent=-20, spaceBefore=5, leading=16),
+                ]
+
+        def afterFlowable(self, flowable):
+            if hasattr(flowable, 'outlineLevel'):
+                self.notify('TOCEntry', (flowable.outlineLevel, flowable.getPlainText(), self.page))
+    
+    if not os.path.exists(opta_filepath):
+        print(f"El fichero {opta_filepath} no existe.")
+        return None
+    df_all_players=pd.read_excel(opta_filepath)
+    start, end = season.split("/")
+
+   
+    if len(start) == 2:
+        start_year = 2000 + int(start)
+    else:
+        start_year = int(start)
+    year=start_year
+    color_selection_og=color_selection
+    color_selection=color_selection.lstrip("#")
+    r,g,b=int(color_selection[0:2],16),int(color_selection[2:4],16),int(color_selection[4:6],16)
+    h,l,s=rgb_to_hls(r/255.0,g/255.0,b/255.0)
+    if l>0.5:
+        letter_colors="#000000"
+        
+    else:
+        letter_colors="#FFFFFF"
+    img_path_1="Logos/icons8-soccer-64.png"
+    img_path_2="Logos/icons8-goal-64.png"
+    img_path_3="Logos/icons8-kick-off-64.png"
+
+    player_path=find_latest_image(f"{BASE_DIR}/report_gen_opta/image_individual")
+    if not os.path.exists(img_path_1):
+        print(f"El fichero {img_path_1} no existe.")
+        return None
+
+    if not os.path.exists(img_path_2):
+        print(f"El fichero {img_path_2} no existe.")
+        return None
+
+    if not os.path.exists(img_path_3):
+        print(f"El fichero {img_path_3} no existe.")
+        return None
+
+    # if not os.path.exists(filepath_carpeta):
+    #     print(f"La carpeta {filepath_carpeta} no existe.")
+    #     return None
+    positions=["Goalkeeper","Defender","Midfielder","Forward"]
+    glossary={}
+    company_name="Departamento de Sports Analytics"
+    fichero_glossary="Glossary.xlsx"
+    for position in positions:
+        try:
+            df_glossary = pd.read_excel(fichero_glossary, sheet_name=position)
+            glossary[position] = []
+            for entry in df_glossary["Glossary"].dropna().astype(str):
+                if ":" in entry:
+                    key, value = entry.split(":", 1)
+                    formatted_entry = f"<b>{key.strip()}</b>: {value.strip()}"
+                else:
+                    formatted_entry = entry  # Leave it as is if no colon
+                glossary[position].append(formatted_entry)
+        except ValueError:
+            print(f"Hoja '{position}' no encontrada en el archivo.")
+        except Exception as e:
+            print(f"Error al leer la hoja '{position}': {e}")
+            
+    positions=["Goalkeeper","Defender","Midfielder","Forward"]
+    glossary_physical={}
+    company_name="Departamento de Sports Analytics"
+    fichero_glossary_physical="Glossary_physical.xlsx"
+    for position in positions:
+        try:
+            df_glossary_physical = pd.read_excel(fichero_glossary_physical, sheet_name=position)
+            glossary_physical[position] = []
+            for entry in df_glossary_physical["Glossary"].dropna().astype(str):
+                if ":" in entry:
+                    key, value = entry.split(":", 1)
+                    formatted_entry = f"<b>{key.strip()}</b>: {value.strip()}"
+                else:
+                    formatted_entry = entry  # Leave it as is if no colon
+                glossary_physical[position].append(formatted_entry)
+        except ValueError:
+            print(f"Hoja '{position}' no encontrada en el archivo.")
+        except Exception as e:
+            print(f"Error al leer la hoja '{position}': {e}")
+    
+    
+    if player_id_analizing not in df_all_players["player_id"].values:
+        print("No se encuentra al jugador")
+        return None
+
+    
+    df_all_players=df_all_players[df_all_players["Time Played"]>min_minutes].copy()
+    if player_id_analizing not in df_all_players["player_id"].values:
+        print(f"El jugador ha jugado menos de {min_minutes} minutos.")
+        return None
+    df_player=df_all_players[df_all_players["player_id"]==player_id_analizing]
+    player_position=df_player["position"].iloc[0]
+
+    df_position=df_all_players[df_all_players["position"]==player_position].copy()
+    #CHANGE FORMULAS FOR CORRECT PATH
+    df_position=calculate_pizza_values(df_position,player_position,"formulas.xlsx")
+    # Ejemplo: buscar a Adela Rico por ID y ver sus goles y xG
+
+    #print("MIN MINUTES:",min_minutes)
+    min_of1, max_of1, player_of1, param_of1,df_all_stats,percentiles_of1,_ = extract_arrays_wyscout(df_position,parameters_file,player_id_analizing,"param_of1",min_minutes)
+
+    min_of2, max_of2, player_of2, param_of2, _ ,percentiles_of2,_= extract_arrays_wyscout(df_position,parameters_file,player_id_analizing,"param_of2",min_minutes)
+    min_def, max_def, player_def, param_def, _,percentiles_def,_ = extract_arrays_wyscout(df_position,parameters_file,player_id_analizing,"param_def",min_minutes)
+    
+    
+    positions_name_dict={"Goalkeeper":"Portera","Defender":"Defensa","Midfielder":"Centrocampista",
+                         "Forward":"Delantera"}
+
+    positions_name_dict1={"Goalkeeper":"Portera","Defender":"Defensa","Midfielder":"Centrocampista",
+                         "Forward":"Delantera"}
+    df_general_stats=df_all_stats[["player_name","team_name","age","Appearances","Time Played","weight","height","player_id","position"]].copy()
+    general_stats_player=df_general_stats[df_general_stats["player_id"]==player_id_analizing].iloc[0]
+    stats_player=df_all_stats[df_all_stats["player_id"]==player_id_analizing].iloc[0]
+    player_name=general_stats_player["player_name"]
+    print(player_name)
+    #print("GENERAL STATS PLAYER:",general_stats_player)
+    player_team=general_stats_player["team_name"]
+
+    player_age=general_stats_player["age"]
+
+
+    player_games=general_stats_player["Appearances"]
+    player_minutes=general_stats_player["Time Played"]
+    player_position_original=general_stats_player["position"]
+    player_position1=positions_name_dict[general_stats_player["position"]]
+    player_param=stats_player["position"]
+
+    player_position_text=positions_name_dict1[player_position]
+        
+    #print("linea 257")
+    player_goals=stats_player["Goals"]
+    if np.isnan(player_goals):
+        player_goals=0
+    player_assists=stats_player["Goal Assists"]
+    if np.isnan(player_assists):
+        player_assists=0
+    player_nationality=stats_player["first_nationality"]
+    player_weight=stats_player["weight"]
+    player_height=stats_player["height"]
+    player_foot=stats_player["prefered_foot"]
+    player_allpositions=stats_player["position"]
+    player_birth_country=stats_player["first_nationality"]
+    from pathlib import Path
+
+    reportgen_path = Path(__file__).resolve().parent
+    folder_skillcorner = reportgen_path / "SKILLCORNER"
+    
+    # team_id=186
+    # _next_path=f"{team_id}/logo/l_t{team_id}.png"
+    # complete_teampath=filepath_carpeta+"/"+_next_path
+    # player_id2=223255
+    # nextpath=f"/{team_id}/formation/f_t{team_id}_p{player_id2}.png"
+    # player_path=filepath_carpeta+nextpath
+    #player path lo dejo asi generic por ahora
+    PLAYER_POSITION=player_position
+
+    #print("linea 275")
+    if player_minutes>min_minutes:
+        fig1,output_path1,fig2,output_path2,fig3,output_path3=pizzaplot_player_opta(df_position,player_id_analizing,player_position,parameters_file,min_minutes,color=color_selection_og,league=current_league,season=season)
+
+        #print(output_path2)
+    else:
+        print(f"El jugador ha jugado menos de {min_minutes} minutos, selecciona otro jugador o baja el número de minutos necesarios.")
+        return None
+    
+    of_score,of_letter,def_score,def_letter,full_score,full_letter,number_of_players_position,Rank_of,Rank_def,Rank_full=notas_tacticas(PLAYER_POSITION,df_position,parameters_file,player_id_analizing,min_minutes)
+    
+    if player_minutes>min_minutes:
+        fig4,output_path4,player_params,parameters_show,phys_average=pizzaplot_phys(player_name,PLAYER_POSITION,folder_skillcorner,color="#FFFFFF")
+        #print(output_path2)
+    else:
+        print(f"El jugador ha jugado menos de {min_minutes} minutos, selecciona otro jugador o baja el número de minutos necesarios.")
+        return None
+    
+    try:
+        player_score,player_letter,number_of_players_position_fis, playerranking = notas_fisicas(
+            PLAYER_POSITION, 
+            df_position,
+            player_name, 
+            parameters_file, 
+            min_minutes, 
+            folder_skillcorner,
+            player_id_analizing
+        )
+    except Exception as e:
+        print(f"Error en notas físicas: {e}")
+        player_score,player_letter,number_of_players_position_fis, playerranking = 0, "-", 0, 0
+
+    
+    # print(of_score)
+    # print(def_score)
+    phys_score,phys_letter=None,None
+    output_phys=None
+    of_score=round(of_score,2)
+    def_score=round(def_score,2)
+
+    PIZZAPLOT_OF1=output_path1
+    PIZZAPLOT_OF2=output_path2
+    PIZZAPLOT_DEF=output_path3
+    PIZZAPLOT_PHYS=output_path4
+    
+
+    #######################
+    #Imagenes
+
+   # TEAM_LOGO = complete_teampath
+    PLAYER_LOGO=player_path
+
+    #mas cositas
+    PLAYER_PHOTO = player_path
+    PLAYER_NAME = player_name
+    PLAYER_TEAM = player_team
+    
+    PLAYER_AGE = player_age
+
+    paths_graficas_2D=graficas_2D(opta_filepath,player_id_analizing,min_minutes,year,folder_skillcorner,color="#FFFFFF")
+
+    ##################################
+
+    
+    #Funcion de crear las barras
+
+    def create_bar_chart(value, percentiles, max_value, min_value=0, width=200, height=10, corner_radius=5, text="Variable"):
+        """
+        Crea un gráfico de barras donde el contenedor siempre mide 'width' 
+        independientemente del valor.
+        """
+        original_value = value
+        # El Drawing debe ser un poco más ancho que la barra para que el texto no se corte
+        drawing = Drawing(width + 60, height + 15)
+
+        # 1. FONDO ESTÁTICO (El "contenedor" gris)
+        # Este siempre mide 'width' (por defecto 200), lo que garantiza la alineación
+        drawing.add(Rect(0, 0, width, height, 
+                         fillColor=HexColor("#333333"), 
+                         rx=corner_radius, ry=corner_radius, 
+                         strokeWidth=0))
+
+        # 2. LÓGICA DE COLOR (Según percentil)
+        if percentiles < 20:
+            color = "#D2222D"  # Rojo oscuro
+        elif percentiles < 40:
+            color = "#D44C56"  # Rojo claro
+        elif percentiles < 60:
+            color = "#FFBF00"  # Amarillo
+        elif percentiles < 80:
+            color = "#45B05B"  # Verde claro
+        else:
+            color = "#007000"  # Verde oscuro
+            
+        fill_color = HexColor(color)
+
+        # 3. RELLENO DINÁMICO
+        # Calculamos cuánto espacio ocupa el percentil respecto al ancho total (width)
+        # Aseguramos que el percentil esté entre 0 y 100
+        safe_percentile = max(0, min(percentiles, 100))
+        filled_width = (safe_percentile / 100.0) * width
+
+        if filled_width > 0:
+            drawing.add(Rect(0, 0, filled_width, height, 
+                             fillColor=fill_color, 
+                             rx=corner_radius, ry=corner_radius, 
+                             strokeWidth=0))
+
+        # 4. TEXTO SOBRE LA BARRA
+        # Usamos String para poner el nombre de la métrica y el valor real
+        drawing.add(String(0, height + 4, f"{text}: {original_value:.2f}", 
+                           fillColor=HexColor(letter_colors), 
+                           fontSize=9, fontName="Helvetica-Bold"))
+
+        return drawing
+    #print("linea 382")
+    class ImageFlowable(Flowable):
+        def __init__(self, image_path, width, height, x=0, y=0):
+            Flowable.__init__(self)
+            self.image = Image(image_path, width=width, height=height)
+            self.x = x  # Posición X
+            self.y = y  # Posición Y
+            self.image_width = width  # Guardamos el ancho
+            self.image_height = height  # Guardamos la altura
+
+        def draw(self):
+            # Coloca la imagen en las coordenadas deseadas
+            self.image.drawOn(self.canv, self.x, self.y)
+
+        def wrap(self, availWidth, availHeight):
+            # Retorna el tamaño de la imagen que especificamos
+            return self.image_width, self.image_height
+
+        def drawOn(self, canv, x, y, _sW=0):
+            self.canv = canv
+            self.x = x
+            self.y = y
+            self.image.drawOn(self.canv, self.x, self.y)
+    
+    """
+    Ahora me pongo a hacer la parte del reportlab
+    """
+    #Aqui lo que hago es inicializar el documento y poner los estilos de las letras
+    # out_dir = Path(tempfile.gettempdir()) / "ReportsGenerados"
+    # out_dir.mkdir(parents=True, exist_ok=True)
+    # output_filename = out_dir / f"Report_{PLAYER_TEAM}_{player_name}.pdf"
+    print("pre output-name:",BASE_DIR)
+    output_filename=f"{BASE_DIR}/report_gen_opta/ReportsGenerados/Report_{PLAYER_TEAM}_{player_name}.pdf"
+    print(output_filename)
+    doc=BaseDocTemplate(output_filename,pagesize=A4,bottomMargin=0)
+    #BaseDocTemplate(output_filename,pagesize=A4,bottomMargin=0)
+    
+    estiloHoja=getSampleStyleSheet()
+    normal_style=estiloHoja["Normal"]
+
+    # Estilos Personalizados
+    title_style = ParagraphStyle(
+        'Title',
+        fontName='Helvetica-Bold',
+        fontSize=28,
+        leading=36,
+        alignment=1,
+        spaceAfter=12,
+        textColor=HexColor(letter_colors)  
+    )
+
+    subtitle_style = ParagraphStyle(
+        'Subtitle',
+        fontName='Helvetica',
+        fontSize=16,
+        leading=20,
+        alignment=1,
+        spaceAfter=6,
+        textColor=HexColor(letter_colors)  # Gris
+    )
+
+    data_style = ParagraphStyle(
+        'Data',
+        fontName='Helvetica',
+        fontSize=12,
+        leading=14,
+        alignment=1,
+        textColor=HexColor(letter_colors)  # Gris oscuro
+    )
+    glossary_style = ParagraphStyle(
+        'Data',
+        fontName='Helvetica',
+        fontSize=12,
+        leading=16,
+        alignment=0,
+        textColor=HexColor(letter_colors)  # Gris oscuro
+    )
+    #ESTO ES TODO PARA LA PORTADA
+    # Función para el Fondo de la Portada
+    def add_background(canvas, doc):
+        #print("Adding background to page", doc.page)
+        canvas.saveState()
+        canvas.setFillColor(HexColor(color_selection_og))  # grey-blue background
+        canvas.rect(0, 0, A4[0], A4[1], fill=1, stroke=0)  # Full-page rectangle
+        # Logo paths (update with your actual paths)
+        logo_left_path = "Logos/URJC_Logo.png"
+        logo_right_path = "Logos/Redes_Logo.png"
+
+        # Logo size (adjust as needed)
+        logo_width = 0.89 * inch
+        logo_width2 = 0.75 * inch
+        logo_height = 0.89 * inch
+
+        # Draw left logo (top-left corner)
+        canvas.drawImage(
+            logo_left_path,
+            x=0.2 * inch,
+            y=A4[1] - logo_height - 0.2 * inch,
+            width=logo_width,
+            height=logo_height,
+            mask='auto'
+        )
+
+        # Draw right logo (top-right corner)
+        canvas.drawImage(
+            logo_right_path,
+            x=A4[0] - logo_width - 0.2 * inch,
+            y=A4[1] - logo_height - 0.2 * inch,
+            width=logo_width,
+           height=logo_height,
+           mask='auto'
+        )
+        page_num = canvas.getPageNumber()
+        text = f"Página {page_num}"
+        canvas.setFont("Helvetica", 9)
+        canvas.setFillColorRGB(0, 0, 0)  # Black text
+        canvas.drawRightString(A4[0] - 0.2 * inch, 0.2 * inch, text)
+        
+        text2=f"{company_name}"
+        canvas.setFont("Helvetica", 9)
+        canvas.setFillColorRGB(0, 0, 0)  # Black text
+        canvas.drawRightString(2.2* inch, 0.2 * inch, text2)
+        canvas.restoreState()
+        
+
+    # Creación de la Portada
+    def create_front_page(canvas, doc):
+        add_background(canvas, doc)
+        canvas.saveState()
+        # Líneas decorativas
+        canvas.setStrokeColor(HexColor(letter_colors))
+        canvas.setLineWidth(1)
+        page_num = canvas.getPageNumber()
+        # text = f"Page {page_num}"
+        # canvas.setFont("Helvetica", 9)
+        # canvas.setFillColorRGB(0, 0, 0)  # Black text
+        # canvas.drawRightString(A4[0] - 0.5 * inch, 0.5 * inch, text)
+        canvas.restoreState()
+    
+
+    # Elementos de la Portada
+    front_page_story = []
+    #front_page_story.append(NextPageTemplate('front'))
+    # Título Principal
+    front_page_story.append(Spacer(0,20))
+    front_page_story.append(Paragraph("Análisis Individual", title_style))
+    # Nombre del Jugador
+    front_page_story.append(Spacer(0,2))
+    front_page_story.append(Paragraph(PLAYER_NAME, subtitle_style))
+    front_page_story.append(Paragraph(f"{PLAYER_TEAM} - {PLAYER_POSITION}", subtitle_style))  # subtitulo con equipo y posicion
+    front_page_story.append(Spacer(0,2))
+    data_text = f"Edad: {PLAYER_AGE}"
+    front_page_story.append(Paragraph(data_text, data_style))
+    front_page_story.append(Spacer(0,20))
+
+    # Foto del Jugador
+    desired_height = 140
+
+    # Open image with Pillow to get its size
+    img_pil = PILImage.open(PLAYER_PHOTO)
+    original_width, original_height = img_pil.size
+
+    ratio = original_width / original_height
+    calculated_width = desired_height * ratio
+    photo = Image(PLAYER_PHOTO, width=calculated_width, height=desired_height)
+    photo.hAlign = 'CENTER'
+
+    front_page_story.append(photo)
+    front_page_story.append(Spacer(1, 0.2 * inch))
+
+    # Datos Adicionales  
+    data_text = f"Edad: {PLAYER_AGE}"
+    front_page_story.append(Paragraph(data_text, data_style))
+    front_page_story.append(Spacer(0,1))
+    data=[[Image(img_path_1,width=30,height=30),Image(img_path_2,width=30,height=30),Image(img_path_3,width=30,height=30)],
+          [f'{int(player_games)}',f'{int(player_goals)}',f'{int(player_assists)}']]
+    # Create the table object
+    table = Table(data)
+    table.setStyle(TableStyle([
+        ('TEXTCOLOR', (0, 0), (-1, -1), HexColor(letter_colors)),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),         # Center alignment
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),        # Vertical alignment
+        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 24),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ]))
+    table.hAling="CENTER"
+
+    front_page_story.append(Spacer(0,1))
+    front_page_story.append(table)
+    ####
+    front_page_story.append(Spacer(0,25))
+    sub_heading=estiloHoja["Heading2"]
+    sub_heading.alignment=TA_CENTER
+    sub_heading.textColor=colors.HexColor(letter_colors)
+    parrafo2=Paragraph(f"Ficha del jugador",sub_heading)
+    front_page_story.append(parrafo2)
+    front_page_story.append(Spacer(0,3))
+    estilo_frames1 = ParagraphStyle(
+        'BodyText',
+        parent=estiloHoja['BodyText'],
+        textColor=HexColor("#808080"),  # White text for visibility on dark background
+        fontSize=12,
+        fontName="Helvetica-Bold",
+        alignment=1
+    )
+    estilo_frames2 = ParagraphStyle(
+        'BodyText',
+        parent=estiloHoja['BodyText'],
+        textColor=HexColor(letter_colors),  # White text for visibility on dark background
+        fontSize=12,
+        fontName="Helvetica",
+        alignment=1
+    )
+    
+    # Datos de la tabla (2 filas por bloque)
+    data1 = [
+        ["Posiciones", "Edad", "Partidos jugados","Minutos jugados"],
+        [player_allpositions, f"{player_age} años", int(player_games),int(player_minutes)]
+        ]
+
+    data2 = [
+        ["Peso", "Altura","Pie dominante", "Pasaporte","País de nacimiento"],
+        [f"{int(player_weight)} kg", f"{int(player_height)} cm",player_foot, player_nationality,player_birth_country]
+        ]
+
+    # Crear tablas
+    table1 = Table(data1, colWidths=[100, 60, 130, 100])
+    table2 = Table(data2, colWidths=[60, 60, 130, 130, 130])
+
+    # Opcional: aplicar estilos a las tablas
+    style = TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTNAME', (0, 1), (-1, 1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+    # Nada de GRID ni BOX para que no se vean líneas
+    ])
+
+    table1.setStyle(style)
+    table2.setStyle(style)
+
+    # Añadir tablas al contenido
+    front_page_story.append(table1)
+    front_page_story.append(Spacer(0, 10))
+    front_page_story.append(table2)
+    front_page_story.append(Spacer(0, 10))
+
+    #Estilo de la cabecera
+    cabecera=estiloHoja["Heading1"]
+    cabecera.alignment=TA_CENTER
+    cabecera.textColor=colors.HexColor(letter_colors)
+    
+    d31=full_letter
+    d32=of_letter
+    d33=def_letter
+    
+  
+
+    d34="No Disponible"
+        
+    if d31=="A":
+        full_colord31="#007000"
+    elif d31=="B":
+        full_colord31="#45B05B" #verde mas clarito
+    elif d31=="C":
+        full_colord31="#FFBF00"
+    else:
+        full_colord31="#D2222D"
+    
+    if d32=="A":
+        full_colord32="#007000"
+    elif d32=="B":
+        full_colord32="#45B05B" #verde mas clarito
+    elif d32=="C":
+        full_colord32="#FFBF00"
+    else:
+        full_colord32="#D2222D"
+        
+    if d33=="A":
+        full_colord33="#007000"
+    elif d33=="B":
+        full_colord33="#45B05B" #verde mas clarito
+    elif d33=="C":
+        full_colord33="#FFBF00"
+    else:
+        full_colord33="#D2222D"
+        
+    if d34=="A":
+        full_colord34="#007000"
+    elif d34=="B":
+        full_colord34="#45B05B" #verde mas clarito
+    elif d34=="C":
+        full_colord34="#FFBF00"
+    else:
+        full_colord34="#D2222D"
+        
+    if player_letter == "A":
+        phys_color = "#007000"
+    elif player_letter == "B":
+        phys_color = "#45B05B"
+    elif player_letter == "C":
+        phys_color = "#FFBF00"
+    else:
+        phys_color = "#D2222D"
+
+    estilo_notes = ParagraphStyle(
+        'BodyText',
+        parent=estiloHoja['BodyText'],
+        textColor=HexColor("#808080"),  # White text for visibility on dark background
+        fontSize=20,
+        fontName="Helvetica-Bold",
+        alignment=1
+    )
+    Paragraph_d1=Paragraph(f'<font color="{full_colord31}">{d31} </font>',estilo_notes)
+    Paragraph_d2=Paragraph(f'<font color="{full_colord32}">{d32} </font>',estilo_notes)
+    Paragraph_d3=Paragraph(f'<font color="{full_colord33}">{d33} </font>',estilo_notes)
+    Paragraph_d4=Paragraph(f'<font color="{full_colord34}">{d34} </font>',estilo_notes)
+    Paragraph_phys = Paragraph(f'<font color="{phys_color}">{player_letter}</font>', estilo_notes)
+    
+    
+    d41=Rank_full
+    d42= Rank_of
+    d43=Rank_def
+    
+    d44="No Disponible"
+        
+    front_page_story.append(Spacer(0,6))
+    parrafo3=Paragraph(f"Valoraciones",sub_heading)
+    front_page_story.append(Spacer(0,3))
+    front_page_story.append(parrafo3)
+    data_t3=[
+        ["Valoración táctica global","Valoración ofensiva","Valoración defensiva","Valoración física"],
+        [Paragraph_d1,Paragraph_d2,Paragraph_d3,Paragraph_phys],
+        [f"{d41}/{number_of_players_position}",f"{d42}/{number_of_players_position}",f"{d43}/{number_of_players_position}",f"{playerranking}/{number_of_players_position_fis}"]
+        ]
+    style = TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),  # Light grey background for the header row
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),       # Black text color for header row
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica'),    # Bold font for header row
+        ('FONTNAME', (0, 1), (-1, 2), 'Helvetica-Bold'),         # Normal Helvetica for second row (maybe first data row)
+        ('FONTSIZE', (0, 0), (-1, 0), 9),                  # Font size 9 for all cells
+        ('FONTSIZE', (0, 1), (-1, 2), 18), 
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),              # Center alignment for all cells
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),             # Padding at the bottom of each cell
+    # No GRID or BOX styles — table will not have visible borders or lines
+    ])
+    table3 = Table(data_t3, colWidths=[120, 120, 120, 120])
+    table3.setStyle(style)
+    front_page_story.append(table3)
+    
+    # # Fecha de Generación
+    
+    date_style = ParagraphStyle('Date', parent=estiloHoja['Normal'], alignment=1, fontSize=10,textColor=HexColor(letter_colors))
+    front_page_story.append(Spacer(1,50))
+    front_page_story.append(Paragraph(f"Informe generado el {time.strftime('%d/%m/%Y')}", date_style))
+    
+
+    #AHORA PARA LA SEGUNDA PAGINA, LA DE INFO
+
+    #Ahora defino los frames
+    frame_front_page = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id='front_page_frame')
+    # frame1=Frame(doc.leftMargin,doc.bottomMargin,(doc.width/2)-cm,doc.height,id="col1")
+    # frame2=Frame(doc.leftMargin+(doc.width/2)+cm,doc.bottomMargin,(doc.width/2) - cm,doc.height,id="col2")
+    logo_buffer=0*inch
+    frame_main = Frame(
+        0,  # Start from left margin
+        0,  # Start from the bottom
+        doc.width,  # Full width of the page
+        doc.height,  # Full height of the page
+        id="main_frame"
+    )
+    #page 2 of report
+    frame_main2 = Frame(
+        0,  # Start from left margin
+        0,  # Start from the bottom
+        doc.width,  # Full width of the page
+        doc.height,
+        #doc.height+doc.topMargin,  # Full height of the page
+        id="main_frame2"
+    )
+    
+    
+   
+    #templates for frontpage and main page
+    template_front_page = PageTemplate(id='front_page', frames=[frame_front_page], onPage=create_front_page)
+    template_main = PageTemplate(id='main', frames=[frame_main],onPage=add_background)
+    template_main2=PageTemplate(id="main_2",frames=[frame_main2],onPage=add_background)
+    template_main3=PageTemplate(id="main_3",frames=[frame_main2],onPage=add_background)
+    #aqui ya seguimos con main page
+
+    main_story=[]
+    main_story.append(Spacer(0,20))
+
+    ####
+    #IMAGEN FOTO JUGADOR
+    image_path = os.path.realpath(PLAYER_PHOTO)
+    
+    #### Pagina Glossary wyscout
+    main_story15=[]
+    glossary_title="Variables de análisis táctico"
+    main_story15.append(Paragraph(glossary_title,title_style))
+    main_story15.append(Spacer(0,1))
+    data_glossary=glossary[player_position_original]
+
+    # main_story15.append(glossary_table)
+    glossary_text="<br/>".join(data_glossary)
+    glossary_paragraph = Paragraph(glossary_text, glossary_style)
+
+    wrapped_paragraph = KeepInFrame(500, 800, content=[glossary_paragraph], mode='shrink')  # or mode='truncate'/'overflow'
+    main_story15.append(wrapped_paragraph)
+    #main_story15.append(Paragraph(glossary_text,glossary_style))
+    
+    main_story16=[]
+    glossary_title="Variables de análisis físico"
+    main_story16.append(Paragraph(glossary_title,title_style))
+    main_story16.append(Spacer(0,1))
+    data_glossary=glossary_physical[player_position_original]
+
+    # main_story15.append(glossary_table)
+    glossary_text="<br/>".join(data_glossary)
+    glossary_paragraph = Paragraph(glossary_text, glossary_style)
+
+    wrapped_paragraph = KeepInFrame(500, 800, content=[glossary_paragraph], mode='shrink')  # or mode='truncate'/'overflow'
+    main_story16.append(wrapped_paragraph)
+    #main_story15.append(Paragraph(glossary_text,glossary_style))
+    
+ 
+    #PIZZAPLOT
+    
+
+    main_story2=[]
+    #main_story2.append(NextPageTemplate('main'))
+    heading2=Paragraph('Estadísticas Ofensivas 1',title_style)
+    heading2.outlineLevel=0
+    main_story2.append(heading2)
+    
+    
+    
+    pizza_offensive_1=Image(PIZZAPLOT_OF1,width=525,height=600)
+    pizza_offensive_1.hAlign="CENTER"
+    main_story2.append(pizza_offensive_1)
+    
+    aclaracion_style = ParagraphStyle(
+        'Data',
+        fontName='Helvetica',
+        fontSize=20,
+        leading=16,
+        alignment=2,
+        textColor=HexColor(letter_colors)  # Gris oscuro
+    )
+    aclaracion_style2 = ParagraphStyle(
+        'Data',
+        fontName='Helvetica',
+        fontSize=10,
+        leading=16,
+        alignment=0,
+        textColor=HexColor(letter_colors)  # Gris oscuro
+    )
+    
+    aclaracion2="* Entre paréntesis se indican, para todas las métricas, los valores promedio para esta posición en la liga."
+    main_story2.append(Spacer(0,5))
+    main_story2.append(Paragraph(aclaracion2,aclaracion_style2))
+    
+
+    main_story6=[]
+    
+    if PIZZAPLOT_OF2 is not None:
+        main_story6.append(Paragraph('Estadísticas Ofensivas 2',title_style))
+        pizza_offensive_2=Image(PIZZAPLOT_OF2,width=525,height=600)
+        pizza_offensive_2.hAlign="CENTER"
+        main_story6.append(pizza_offensive_2)
+        main_story6.append(Spacer(0,5))
+        main_story6.append(Paragraph(aclaracion2,aclaracion_style2))
+    else:
+        
+        Paragraph_not= "PIZZAPLOT_OF2 does not exist."
+        main_story6.append(Paragraph(Paragraph_not, title_style))
+    
+
+    main_story5=[]
+    
+    heading5=Paragraph('Estadísticas Defensivas',title_style)
+    heading5.outlineLevel=0
+    main_story5.append(heading5)
+    pizza_defensive = Image(PIZZAPLOT_DEF,width=525, height=600)
+    pizza_defensive.hAlign = 'CENTER'
+    main_story5.append(pizza_defensive)
+    main_story5.append(Spacer(0,5))
+    main_story5.append(Paragraph(aclaracion2,aclaracion_style2))
+    
+    
+    #pagina 3 con percentiles
+    bars=[]
+   
+
+    for i in range(len(min_of1)):
+        min_value=min_of1.iloc[i]
+        max_value=max_of1.iloc[i]
+        player_value=player_of1.iloc[i]
+        text=player_of1.index[i]
+        percentile=percentiles_of1[i]
+        bar=create_bar_chart(player_value,percentile,max_value,min_value,width=200, height=10, corner_radius=5,text=text)
+        bars.append(bar)
+    bars2=[]
+
+    for i in range(len(min_of2)):
+        min_value=min_of2.iloc[i]
+        max_value=max_of2.iloc[i]
+        player_value=player_of2.iloc[i]
+        text=player_of2.index[i]
+        percentile=percentiles_of2[i]
+        bar=create_bar_chart(player_value,percentile,max_value,min_value,width=200, height=10, corner_radius=5,text=text)
+        bars2.append(bar)
+            
+    main_story3=[]
+    main_story3.append(Spacer(0,20))
+    cadena6=f"Estadísticas Ofensivas"
+    parrafo9=Paragraph(cadena6,title_style)
+    cadena66=f"{player_name}"
+    parrafo99=Paragraph(cadena66,cabecera)
+    main_story3.append(parrafo9)
+    main_story3.append(parrafo99)
+    main_story3.append(Spacer(0,5))
+    grouped_bars = [bars[i:i+2] for i in range(0, len(bars), 2)]
+    for row_index, bar_pair in enumerate(grouped_bars):
+        # Create table with 2 columns for this row
+        table_data = [bar_pair]  # Use the pair directly as a row
+        
+        # Create table with invisible borders
+        t = Table(table_data, colWidths=[250, 250])  # Adjust column widths as needed
+        t.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP')              # Align content at the top
+        ]))
+        main_story3.append(t)
+        main_story3.append(Spacer(0, 15))  # Add vertical space between rows
+    grouped_bars2 = [bars2[i:i+2] for i in range(0, len(bars2), 2)]
+    for row_index, bar_pair2 in enumerate(grouped_bars2):
+        # Create table with 2 columns for this row
+        table_data2 = [bar_pair2]  # Use the pair directly as a row
+        
+        # Create table with invisible borders
+        t2 = Table(table_data2, colWidths=[250, 250])  # Adjust column widths as needed
+        t2.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP')              # Align content at the top
+        ]))
+        main_story3.append(t2)
+        main_story3.append(Spacer(0, 15))  # Add vertical space between rows
+    
+    score_style = ParagraphStyle(
+        'Title',
+        fontName='Helvetica-Bold',
+        fontSize=24,
+        leading=36,
+        alignment=1,
+        spaceAfter=12,
+        textColor=HexColor(letter_colors)  
+    )
+    if of_letter=="A":
+        of_color="#007000"
+    elif of_letter=="B":
+        of_color="#45B05B" #verde mas clarito
+    elif of_letter=="C":
+        of_color="#FFBF00"
+    else:
+        of_color="#D2222D"
+        
+    if def_letter=="A":
+        def_color="#007000"
+    elif def_letter=="B":
+        def_color="#45B05B" #verde mas clarito
+    elif def_letter=="C":
+        def_color="#FFBF00"
+    else:
+        def_color="#D2222D"
+    
+    if full_letter=="A":
+        full_color="#007000"
+    elif full_letter=="B":
+        full_color="#45B05B" #verde mas clarito
+    elif full_letter=="C":
+        full_color="#FFBF00"
+    else:
+        full_color="#D2222D"
+    main_story3.append(Spacer(0,10))
+    Paragraph_of=f"Valoración ofensiva ({PLAYER_POSITION}):"
+    main_story3.append(Paragraph(Paragraph_of,title_style))
+    #Paragraph_score_of=f'<font color="{of_color}">{of_letter} </font>'
+    letters=["A","B","C","D"]
+    formatted=''
+    for letter in letters:
+        if letter==of_letter:
+            formatted+= f'<font color="{of_color}" size="48"> <b>{letter}</b></font>&nbsp  '
+        else:
+            formatted+=f"{letter} &nbsp "
+    Paragraph_score_of =formatted   
+    main_story3.append(Spacer(0,5))
+    main_story3.append(Paragraph(Paragraph_score_of,score_style))
+    main_story3.append(Spacer(0,20))
+    texto_aclaración="* Valoración en función de las variables ponderadas según la posición del jugador"
+    main_story3.append(Paragraph(texto_aclaración,aclaracion_style2))
+    
+    
+    main_story4=[]
+    main_story4.append(Spacer(0,20))
+    cadena7=f"Estadísticas Defensivas"
+    parrafo10=Paragraph(cadena7,title_style)
+    cadena77=f"{player_name}"
+    parrafo100=Paragraph(cadena77,cabecera)
+    main_story4.append(parrafo10)
+    main_story4.append(parrafo100)
+    main_story4.append(Spacer(0,5))
+    
+    bars3=[]
+
+    for i in range(len(min_def)):
+        min_value=min_def.iloc[i]
+        max_value=max_def.iloc[i]
+        player_value=player_def.iloc[i]
+        text=player_def.index[i]
+        percentile=percentiles_def[i]
+        bar=create_bar_chart(player_value,percentile,max_value,min_value,width=200, height=10, corner_radius=5,text=text)
+        bars3.append(bar)
+        
+    grouped_bars3 = [bars3[i:i+2] for i in range(0, len(bars3), 2)]
+    for row_index, bar_pair3 in enumerate(grouped_bars3):
+        # Create table with 2 columns for this row
+        table_data3 = [bar_pair3]  # Use the pair directly as a row
+        
+        # Create table with invisible borders
+        t3 = Table(table_data3, colWidths=[250, 250])  # Adjust column widths as needed
+        t3.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP')              # Align content at the top
+        ]))
+        main_story4.append(t3)
+        main_story4.append(Spacer(0, 15))  # Add vertical space between rows
+    main_story4.append(Spacer(0,10))
+    Paragraph_def=f"Valoración defensiva ({PLAYER_POSITION}):"
+    main_story4.append(Paragraph(Paragraph_def,title_style))
+    main_story4.append(Spacer(0,5))
+    Paragraph_score_def=f'<font color="{def_color}">{def_letter} </font>'
+    letters=["A","B","C","D"]
+    formatted2=''
+    for letter in letters:
+        if letter==def_letter:
+            formatted2+= f'<font color="{def_color}" size="48"><b>{letter}</b></font>&nbsp  '
+        else:
+            formatted2+=f"{letter} &nbsp "
+    Paragraph_score_def =formatted2 
+    main_story4.append(Paragraph(Paragraph_score_def,score_style))
+    main_story4.append(Spacer(0,15))
+    linea_image_path="Logos/linea_break.jpg"
+    Linea = Image(linea_image_path,width=500, height=10)
+    Linea.hAlign = "CENTER"
+    main_story4.append(Linea)
+    Paragraph_full=f"Valoración táctica global ({PLAYER_POSITION}):"
+    main_story4.append(Paragraph(Paragraph_full,title_style))
+    main_story4.append(Spacer(0,5))
+    Paragraph_score_full=f'<font color="{full_color}">{full_letter} </font>'
+    letters=["A","B","C","D"]
+    formatted3=''
+    for letter in letters:
+        if letter==full_letter:
+            formatted3+= f'<font color="{full_color}" size="48"><b>{letter}</b></font>&nbsp  '
+        else:
+            formatted3+=f"{letter} &nbsp "
+    Paragraph_score_full =formatted3 
+    main_story4.append(Paragraph(Paragraph_score_full,score_style))
+    main_story4.append(Spacer(0,20))
+    main_story4.append(Paragraph(texto_aclaración,aclaracion_style2))
+    
+    # Add page template with the two-column layout
+    doc.addPageTemplates([template_front_page, template_main])
+    
+    # ------------- SECCIÓN ESTADÍSTICAS FÍSICAS (main_story7) -------------
+    
+    # 2. Creación de la sección en el PDF
+    main_story7 = []
+    main_story7.append(Spacer(0, 20))
+    main_story7.append(Paragraph("Estadísticas Físicas", title_style))
+    main_story7.append(Paragraph(f"{player_name}", cabecera))
+    main_story7.append(Spacer(0, 10))
+    
+    bars_phys = []
+
+    # IMPORTANTE: 
+    # player_params contiene los PERCENTILES (0-100)
+    # parameters_show contiene los NOMBRES con \n
+    # phys_average contiene las MEDIAS de la liga
+    
+    for i in range(len(player_params)):
+        percentile = player_params[i]
+        # Limpiamos el nombre (quitamos los saltos de línea para que quepa en la barra)
+        text = parameters_show[i].replace('\n', ' ') 
+        
+        # Para el "player_value" en la barra:
+        # Si tu función pizzaplot_phys no devuelve los valores reales (metros, etc.) 
+        # sino solo percentiles, puedes pasar el percentil como valor. 
+        # Pero si quieres que salga "9400 m", necesitarías devolver 'player_raw_data' también.
+        # --- CÁLCULO DEL MÁXIMO DE LA LIGA ---
+        # Buscamos en el DataFrame original de física el valor máximo para este parámetro
+        # Nota: Asegúrate de que text_clean coincida con el nombre de la columna en tu DF
+        try:
+            # Aquí 'df_phys_league' sería tu DataFrame con todas las jugadoras de Skillcorner
+            max_league_value = player_params[text].max()
+            player_real_value = player_params[i] # El valor real (ej. 10500 metros)
+        except:
+            # Fallback por si no encuentras el valor real: usamos percentiles
+            max_league_value = 100
+            player_real_value = percentile    
+        
+        # Por ahora, usamos el percentil para rellenar la barra visualmente:
+        bar = create_bar_chart(
+            percentile, # El número que se muestra
+            percentile,   # El relleno de la barra
+            max_value=max_league_value,           # El tope es 100%
+            min_value=0, 
+            width=200, 
+            height=10, 
+            corner_radius=5, 
+            text=text
+            )   
+        bars_phys.append(bar)
+
+    # 3. Agrupar y añadir a la historia (mismo proceso que el defensivo)
+    grouped_bars_phys = [bars_phys[i:i+2] for i in range(0, len(bars_phys), 2)]
+    for bar_pair in grouped_bars_phys:
+        t_phys = Table([bar_pair], colWidths=[250, 250])
+        t_phys.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP')]))
+        main_story7.append(t_phys)
+        main_story7.append(Spacer(0, 15))
+
+    # --- BLOQUE PARA MOSTRAR LAS LETRAS DE VALORACIÓN FÍSICA ---
+    # Calculamos la nota (f_let) y el color (f_col) basado en el promedio de los percentiles
+    avg_phys = sum(player_params) / len(player_params)
+    
+    if avg_phys >= 75: 
+        f_let, f_col = "A", "#007000"
+    elif avg_phys >= 50: 
+        f_let, f_col = "B", "#45B05B"
+    elif avg_phys >= 25: 
+        f_let, f_col = "C", "#FFBF00"
+    else: 
+        f_let, f_col = "D", "#D2222D"
+
+    # Añadimos el título de la valoración
+    main_story7.append(Spacer(0, 10))
+    Paragraph_phys_title = f"Valoración Condición Física ({PLAYER_POSITION}):"
+    main_story7.append(Paragraph(Paragraph_phys_title, title_style))
+    main_story7.append(Spacer(0, 5))
+
+    # Generamos la cadena con todas las letras, resaltando la que corresponde
+    letters = ["A", "B", "C", "D"]
+    formatted_phys = ''
+    for letter in letters:
+        if letter == f_let:
+            # Letra grande y en color
+            formatted_phys += f'<font color="{f_col}" size="48"><b>{letter}</b></font>&nbsp;  '
+        else:
+            # Letras normales
+            formatted_phys += f"{letter} &nbsp; "
+    
+    # Añadimos el párrafo de las letras al main_story7
+    main_story7.append(Paragraph(formatted_phys, score_style))
+    
+    # Separador y nota aclaratoria final
+    main_story7.append(Spacer(0, 15))
+    linea_image_path = "Logos/linea_break.jpg"
+    Linea_phys = Image(linea_image_path, width=500, height=10)
+    Linea_phys.hAlign = "CENTER"
+    main_story7.append(Linea_phys)
+    
+    main_story17=[]
+    title_style_small=ParagraphStyle(
+        'Title',
+        fontName='Helvetica-Bold',
+        fontSize=18,
+        leading=36,
+        alignment=1,
+        spaceAfter=12,
+        textColor=HexColor(letter_colors)  
+    )
+
+    title_17="Métricas Ofensivas"
+    main_story17.append(Paragraph(title_17,title_style))
+    main_story17.append(Paragraph("Goles y goles esperados (xG)",title_style_small))
+    Grafica2D1 = Image(paths_graficas_2D[0],width=600, height=600)
+    Grafica2D1.hAlign = "CENTER"
+    main_story17.append(Grafica2D1)
+    main_story17.append(PageBreak())
+    main_story17.append(Paragraph("Asistencias y asistencias esperadas (xA)",title_style_small))
+    Grafica2D2 = Image(paths_graficas_2D[1],width=600, height=600)
+    Grafica2D2.hAlign = "CENTER"
+    main_story17.append(Grafica2D2)
+    
+    main_story18=[]
+    main_story18.append(Paragraph("Jugadas Clave",title_style_small))
+    Grafica2D3 = Image(paths_graficas_2D[2],width=600, height=600)
+    Grafica2D3.hAlign = "CENTER"
+    main_story18.append(Grafica2D3)
+    main_story18.append(PageBreak())
+    
+    main_story18.append(Paragraph("Pases en zona rival",title_style_small))
+    Grafica2D4 = Image(paths_graficas_2D[3],width=600, height=600)
+    Grafica2D4.hAlign = "CENTER"
+    main_story18.append(Grafica2D4)
+    
+    main_story18.append(PageBreak())
+    main_story18.append(Paragraph("Duelos",title_style_small))
+    Grafica2D5 = Image(paths_graficas_2D[4],width=600, height=600)
+    Grafica2D5.hAlign = "CENTER"
+    main_story18.append(Grafica2D5)
+    
+    main_story19=[]
+    main_story19.append(Paragraph("Pases cortos",title_style_small))
+    Grafica2D6 = Image(paths_graficas_2D[5],width=600, height=600)
+    Grafica2D6.hAlign = "CENTER"
+    main_story19.append(Grafica2D6)
+    main_story19.append(PageBreak())
+    main_story19.append(Paragraph("Pases largos",title_style_small))
+    Grafica2D7 = Image(paths_graficas_2D[6],width=600, height=600)
+    Grafica2D7.hAlign = "CENTER"
+    main_story19.append(Grafica2D7)
+    
+    main_story20=[]
+    main_story20.append(Paragraph("Pases progresivos",title_style_small))
+    Grafica2D8 = Image(paths_graficas_2D[7],width=600, height=600)
+    Grafica2D8.hAlign = "CENTER"
+    main_story20.append(Grafica2D8)
+    main_story20.append(PageBreak())
+    
+    main_story20.append(Paragraph("Regates",title_style_small))
+    Grafica2D9 = Image(paths_graficas_2D[8],width=600, height=600)
+    Grafica2D9.hAlign = "CENTER"
+    main_story20.append(Grafica2D9)
+    
+    main_story21=[]
+    
+    title_21="Métricas Defensivas"
+    main_story21.append(Paragraph(title_21,title_style))
+    main_story21.append(Paragraph("Recuperaciones vs Pérdidas",title_style_small))
+    Grafica2D10 = Image(paths_graficas_2D[9],width=600, height=600)
+    Grafica2D10.hAlign = "CENTER"
+    main_story21.append(Grafica2D10)
+    main_story21.append(PageBreak())
+    main_story21.append(Paragraph("Interceptaciones vs posesión conquistada",title_style_small))
+    Grafica2D11 = Image(paths_graficas_2D[10],width=600, height=600)
+    Grafica2D11.hAlign = "CENTER"
+    main_story21.append(Grafica2D11)
+    main_story21.append(PageBreak())
+    main_story21.append(Paragraph("Duelos Aereos",title_style_small))
+    Grafica2D12 = Image(paths_graficas_2D[11],width=600, height=600)
+    Grafica2D12.hAlign = "CENTER"
+    main_story21.append(Grafica2D12)
+    
+    main_story212=[]
+    
+    title_212="Métricas Físicas"
+    main_story212.append(Paragraph(title_212,title_style))
+    main_story212.append(Paragraph("Distancia Total(m) vs Nº Actividades Alta Intensidad",title_style_small))
+    Grafica2D13 = Image(paths_graficas_2D[12],width=600, height=600)
+    Grafica2D13.hAlign = "CENTER"
+    main_story212.append(Grafica2D13)
+    main_story212.append(PageBreak())
+    main_story212.append(Paragraph("Distancia en Sprint vs Velocidad Máxima",title_style_small))
+    Grafica2D14 = Image(paths_graficas_2D[13],width=600, height=600)
+    Grafica2D14.hAlign = "CENTER"
+    main_story212.append(Grafica2D14)
+    main_story212.append(PageBreak())
+    main_story212.append(Paragraph("Aceleraciones Altas vs 'Deceleraciones Altas",title_style_small))
+    Grafica2D15 = Image(paths_graficas_2D[14],width=600, height=600)
+    Grafica2D15.hAlign = "CENTER"
+    main_story212.append(Grafica2D15)
+    
+    
+    main_story22=[]
+    title_22="Posiciones Específicas"
+    main_story22.append(Paragraph(title_22,title_style))
+    texto = """GK: portero.
+    LB: lateral izquierdo.
+    RB: lateral derecho.
+    DMF: mediocentro defensivo.
+    OF: mediocentro ofensivo.
+    AMF: mediapunta.
+    LCB: defensa central izquierdo.
+    RCB: defensa central derecho.
+    CB: defensa central.
+    LWF: extremo izquierdo.
+    RWF: extremo derecho.
+    LW: carrillero izquierdo.
+    RW: carrillero derecho.
+    LAMF: media punta izquierdo.
+    RAMF: media punta derecho.
+    LCMF: interior (mediapunta izquierdo).
+    RCMF: interior (mediapunta derecho).
+    CF: delantero centro."""
+    
+    partes=texto.split("\n")
+    contenido_format=""
+    for linea in partes:
+        if ":" in linea:
+            clave, valor=linea.split(":",1)
+            contenido_format+=f"<b>{clave.strip()}:</b> {valor.strip()}<br/>"
+            
+            
+    glossary_style2 = ParagraphStyle(
+        'Data',
+        fontName='Helvetica',
+        fontSize=12,
+        leading=16,
+        alignment=0,
+        textColor=HexColor(letter_colors)  # Gris oscuro
+    )
+    main_story22.append(Spacer(0,5))
+    parrafo11=Paragraph(contenido_format,glossary_style2)
+
+    main_story22.append(parrafo11)
+    
+    # --- PÁGINA PIZZA FÍSICO ---
+
+    main_story_phys = []
+    
+    # 1. Título de la página
+    heading_phys = Paragraph('Análisis del Perfil Físico', title_style)
+    heading_phys.outlineLevel = 0
+    main_story_phys.append(heading_phys)
+    
+    # 2. Añadir la imagen de la Pizza Física
+    # Asegúrate de que 'output_path_phys' sea la variable donde guardaste el PNG de la pizza física
+    pizza_physical_img = Image(PIZZAPLOT_PHYS, width=525, height=600)
+    pizza_physical_img.hAlign = "CENTER"
+    main_story_phys.append(pizza_physical_img)
+    
+    # 3. Estilo para la aclaración (puedes reutilizar el que ya tenías)
+    aclaracion_style_phys = ParagraphStyle(
+        'AclaracionFisica',
+        fontName='Helvetica',
+        fontSize=10,
+        leading=12,
+        alignment=0,
+        textColor=HexColor("#333333") # O usar la variable letter_colors
+        )
+    
+    # 4. Texto explicativo
+    aclaracion_phys = (
+        "<b>Nota:</b> Los percentiles mostrados comparan el rendimiento físico de la jugadora "
+        "específicamente con otras jugadoras de su misma posición (en este caso: " + PLAYER_POSITION + "). "
+        "Entre paréntesis se indica el valor real de la métrica y el promedio de la liga."
+        )
+    
+    main_story_phys.append(Spacer(1, 15)) # Espacio antes del texto
+    main_story_phys.append(Paragraph(aclaracion_phys, aclaracion_style_phys))
+    
+   
+    
+    # aqui voy a empezar a añadir lo de chat gpt- que sea ofensivo y defensivo y que sean dos hojas distintas?
+    #por ahora 1 hojita
+    main_story23=[]
+    context=f"You are going to contribute to a player report about a player in {current_league} league in Spain. Be thorough and impartial, providing clear observations and evidence to support your analysis. Highlight key performance indicators and suggest potential for development. If the value is smaller than the average it means he is worse. If the value is better than the average it means he is better. If you know his place of birth, add it."
+    create_chat_log(context)
+    player_arrayof1,average_arrayof1,player_name,player_pos,params_arrayof1=extract_arrays_wyscout2(df_position,parameters_file,player_id_analizing,"param_of1",min_minutes)
+    player_arrayof2,average_arrayof2,player_name,player_pos,params_arrayof2=extract_arrays_wyscout2(df_position,parameters_file,player_id_analizing,"param_of2",min_minutes)
+    player_arrayof = pd.concat([player_arrayof1, player_arrayof2])
+    
+    #print(type(params_arrayof1))
+    average_arrayof = pd.concat([average_arrayof1, average_arrayof2])
+    #params_arrayof = pd.concat([params_arrayof1, params_arrayof2])
+    
+    #average_arrayof=average_arrayof1+average_arrayof2
+    params_arrayof=params_arrayof1+params_arrayof2
+    
+    dict_english={"delantero":"forward","ofmid":"ofensive midfielder","extremo":"winger","defmid":"defensive midfielder","lateral":"fullback","defensa":"center back","portero":"goalkeeper"}
+    
+    chat_comment = f"Write a paragraph highlighting the ofensive strengths and weaknesses of the player {player_name} in the position {player_position}. The parameters we are evaluating are; {params_arrayof}. The player's values are: {player_arrayof}. The average values are: {average_arrayof}"
+    chat(chat_comment, context, action="translate", language="Spanish",chat_log=None)
+    
+    with open("response.txt","r",encoding="utf-8") as file:
+        text_ofensive=file.read()
+    paragraphs=text_ofensive.split("\n\n")
+    
+    
+    #we keep all paragraphs expect first
+    of_text = "<br/><br/>".join(paragraphs[2:]) if len(paragraphs) > 1 else ""
+    of_text = clean_text_for_paragraph(of_text)
+    parrafo_oftxt = Paragraph(of_text, glossary_style2)
+    main_story23.append(Paragraph("Resumen Ofensivo", title_style))
+    main_story23.append(parrafo_oftxt)
+    with open("response.txt", "w", encoding="utf-8") as file:
+        file.write("")
+    
+    
+    player_arraydef,average_arraydef,player_name,player_pos,params_arraydef=extract_arrays_wyscout2(df_position,parameters_file,player_id_analizing,"param_def",min_minutes)
+    
+    chat_comment = f"Write a paragraph highlighting the defensive strengths and weaknesses of the player {player_name} in the position {player_position}. The parameters we are evaluating are; {params_arraydef}. The player's values are: {player_arraydef}. The average values are: {average_arraydef}"
+    chat(chat_comment, context, action="translate", language="Spanish",chat_log=None)
+    
+    with open("response.txt","r",encoding="utf-8") as file:
+        text_defensive=file.read()
+    paragraphs=text_defensive.split("\n\n")
+    #we keep all paragraphs expect first
+    def_text = "<br/><br/>".join(paragraphs[2:]) if len(paragraphs) > 1 else ""
+    def_text = clean_text_for_paragraph(def_text)
+    parrafo_deftxt = Paragraph(def_text, glossary_style2)
+    main_story23.append(PageBreak())
+    main_story23.append(Paragraph("Resumen Defensivo", title_style))
+    main_story23.append(parrafo_deftxt)
+    
+    with open("response.txt", "w", encoding="utf-8") as file:
+        file.write("")
+        
+    chat_comment = f"Write a paragraph highlighting the physical strengths and weaknesses of the player {player_name} in the position {player_position}. The parameters we are evaluating are; {parameters_show}. The player's values are: {player_params}. The average values are: {phys_average}"
+    chat(chat_comment, context, action="translate", language="Spanish",chat_log=None)
+    
+    with open("response.txt","r",encoding="utf-8") as file:
+        text_phys=file.read()
+    paragraphs=text_phys.split("\n\n")
+    #we keep all paragraphs expect first
+    def_text = "<br/><br/>".join(paragraphs[2:]) if len(paragraphs) > 1 else ""
+    parrafo_deftxt=Paragraph(def_text,glossary_style2)
+    main_story23.append(PageBreak())
+    main_story23.append(Paragraph("Resumen Físico",title_style))
+    main_story23.append(parrafo_deftxt)
+    
+    with open("response.txt", "w", encoding="utf-8") as file:
+        file.write("")
+        
+
+    #print("linea 1204")
+   
+    
+    if PLAYER_POSITION=="Defender" or PLAYER_POSITION=="Lateral" or PLAYER_POSITION=="Goalkeeper":
+        #### INDICE
+        index_story=[]
+            
+        index_style = ParagraphStyle(
+            'TOC',
+            fontName='Helvetica',
+            fontSize=14,
+            leading=36,
+            alignment=0,
+            spaceAfter=12,
+            textColor=HexColor(letter_colors)
+        )
+            
+        entries = [("1. Estadísticas Ofensivas", "3"),
+            ("2. Estadísticas Defensivas", "4"),
+            ("3. Anexos", "5")]
+
+        def fill_dots(title, total_width=98):
+            width=total_width-len(title)-1
+            return title + " " 
+
+        index_story = []
+        index_story.append(Paragraph("Índice", title_style))
+        index_story.append(Spacer(1, 20))
+            
+        table_data = []
+        for title, page in entries:
+                
+            table_data.append([fill_dots(title, 96), page])
+
+        table = Table(table_data, colWidths=[150*mm, 20*mm])
+        table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 14),
+            ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ]))
+
+            
+        index_story.append(table)
+            # #### INDICE
+            # index_story=[]
+            # styles = getSampleStyleSheet()
+            # toc = TableOfContents()
+            # toc.levelStyles = [
+            #     ParagraphStyle(fontName='Helvetica', fontSize=14, name='TOCHeading1', leftIndent=20, firstLineIndent=-20, spaceBefore=5, leading=16),
+            #     ]
+            # index_story.append(Paragraph('Índice', styles['Heading1']))
+            # index_story.append(toc)
+        full_Story = ( 
+            front_page_story + [PageBreak()] +
+            index_story + [PageBreak()] +
+            main_story2 + [PageBreak()] +
+            main_story3 + [PageBreak()] +
+            main_story5 + [PageBreak()] +
+            main_story4 + [PageBreak()] +
+            main_story_phys + [PageBreak()] +
+            main_story7 + [PageBreak()] +
+            main_story23 + [PageBreak()] +
+            main_story17 + [PageBreak()] +
+            main_story18 + [PageBreak()] +
+            main_story19 + [PageBreak()] +
+            main_story20 + [PageBreak()] +
+            main_story21 + [PageBreak()] +
+            main_story212 + [PageBreak()] +
+            main_story15 + [PageBreak()] +
+            main_story16 + [PageBreak()] +
+            main_story22
+            )
+            
+    else:
+            #### INDICE
+        index_story=[]
+            
+        index_style = ParagraphStyle(
+            'TOC',
+            fontName='Helvetica',
+            fontSize=14,
+            leading=36,
+            alignment=0,
+            spaceAfter=12,
+            textColor=HexColor(letter_colors)
+        )
+            
+        entries = [("1. Estadísticas Ofensivas", "3"),
+            ("2. Estadísticas Defensivas", "5"),
+            ("3. Anexos", "6")]
+
+        def fill_dots(title, total_width=98):
+            width=total_width-len(title)-1
+            return title + " " 
+
+        index_story = []
+        index_story.append(Paragraph("Índice", title_style))
+        index_story.append(Spacer(1, 20))
+            
+        table_data = []
+        for title, page in entries:
+                
+            table_data.append([fill_dots(title, 96), page])
+
+        table = Table(table_data, colWidths=[150*mm, 20*mm])
+        table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 14),
+            ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ]))
+
+            
+        index_story.append(table)
+            # #### INDICE
+            # index_story=[]
+            # styles = getSampleStyleSheet()
+            # toc = TableOfContents()
+            # toc.levelStyles = [
+            #     ParagraphStyle(fontName='Helvetica', fontSize=14, name='TOCHeading1', leftIndent=20, firstLineIndent=-20, spaceBefore=5, leading=16),
+            #     ]
+            # index_story.append(Paragraph('Índice', styles['Heading1']))
+            # index_story.append(toc)
+        full_Story = ( 
+            front_page_story + [PageBreak()] +
+            index_story + [PageBreak()] +
+            main_story2 + [PageBreak()] +
+            main_story6 + [PageBreak()] +
+            main_story3 + [PageBreak()] +
+            main_story5 + [PageBreak()] +
+            main_story4 + [PageBreak()] +
+            main_story_phys + [PageBreak()] +
+            main_story7 + [PageBreak()] +
+            main_story23 + [PageBreak()] +
+            main_story17 + [PageBreak()] +
+            main_story18 + [PageBreak()] +
+            main_story19 + [PageBreak()] +
+            main_story20 + [PageBreak()] +
+            main_story21 + [PageBreak()] +
+            main_story212 + [PageBreak()] +
+            main_story15 + [PageBreak()] +
+            main_story16 + [PageBreak()] +
+            main_story22 
+            )
+    if summary==1:
+        if PLAYER_POSITION=="Defender" or PLAYER_POSITION=="Lateral" or PLAYER_POSITION=="Goalkeeper":
+            full_Story = ( 
+                front_page_story + [PageBreak()] +
+                index_story + [PageBreak()] +
+                main_story2 + [PageBreak()] +
+                main_story3 + [PageBreak()] +
+                main_story5 + [PageBreak()] +
+                main_story4 + [PageBreak()] +
+                main_story_phys + [PageBreak()] +
+                main_story7 + [PageBreak()] +
+                main_story23 + [PageBreak()] +
+                main_story17 + [PageBreak()] +
+                main_story18 + [PageBreak()] +
+                main_story19 + [PageBreak()] +
+                main_story20 + [PageBreak()] +
+                main_story21 + [PageBreak()] +
+                main_story212 + [PageBreak()] +
+                main_story15 + [PageBreak()] +
+                main_story16 + [PageBreak()] +
+                main_story22 
+                )
+        else:
+            full_Story = ( 
+                front_page_story + [PageBreak()] +
+                index_story + [PageBreak()] +
+                main_story2 + [PageBreak()] +
+                main_story6 + [PageBreak()] +
+                main_story3 + [PageBreak()] +
+                main_story5 + [PageBreak()] +
+                main_story4 + [PageBreak()] +
+                main_story_phys + [PageBreak()] +
+                main_story7 + [PageBreak()] +
+                main_story23 + [PageBreak()] +
+                main_story17 + [PageBreak()] +
+                main_story18 + [PageBreak()] +
+                main_story19 + [PageBreak()] +
+                main_story20 + [PageBreak()] +
+                main_story21 + [PageBreak()] +
+                main_story212 + [PageBreak()] +
+                main_story15 + [PageBreak()] +
+                main_story16 + [PageBreak()] +
+                main_story22 
+                )
+        
+    #print("peta el build?")
+    doc.build(
+        full_Story
+    )
+    # destination_folder="/Users/julieta/Dropbox/Informes_copy"
+    # shutil.copy(output_filename, destination_folder)
+    images_to_delete = [output_path1, output_path2, output_path3] + paths_graficas_2D
+    
+    for image_file in images_to_delete:
+        try:
+            os.remove(image_file)
+        except Exception as e:
+            print(f"Error deleting {image_file}: {e}")
+            
+    print("PDF generated successfully!")
+#create_report(250568,"/Users/julieta/Desktop/APP_Generic_Femeni/report_gen/LigaF_opta_2024.xlsx","/Users/julieta/Desktop/APP_Generic_Femeni/report_gen/parameters.xlsx",500,color_selection="#FFFFFF",summary=0,current_league="Liga F",season="2024/25")
+
+if __name__ == "__main__":
+    #print("ENTRAMOS BIEN")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--player_id_analizing", type=int, required=True)
+    parser.add_argument("--opta_filepath", type=str, required=True)
+    parser.add_argument("--parameters_file", type=str, required=True)
+    parser.add_argument("--min_minutes", type=int, default=500)
+    parser.add_argument("--color_selection", type=str, default="#FFFFFF")
+    parser.add_argument("--summary", type=int, default=0)
+    parser.add_argument("--current_league", type=str, default="Liga F")
+    parser.add_argument("--season", type=str, default="2024/25")
+
+    args = parser.parse_args()
+    create_report(
+        player_id_analizing=args.player_id_analizing,
+        opta_filepath=args.opta_filepath,
+        parameters_file=args.parameters_file,
+        min_minutes=args.min_minutes,
+        color_selection=args.color_selection,
+        summary=args.summary,
+        current_league=args.current_league,
+        season=args.season
+    )

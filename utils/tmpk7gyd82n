@@ -1,0 +1,94 @@
+import streamlit as st
+import pandas as pd
+
+# Validación simple de usuario y clave con un archivo csv
+def validarUsuario(usuario, clave):
+    dfusuarios = pd.read_csv('usuarios.csv')
+    return any((dfusuarios['usuario'] == usuario) & (dfusuarios['clave'] == clave))
+
+def generarMenu(usuario):
+    rol = st.session_state.get('rol', 'admin')
+    
+    with st.sidebar:
+        # dfusuarios = pd.read_csv('usuarios.csv')
+        # dfUsuario = dfusuarios[(dfusuarios['usuario'] == usuario)]
+        nombre = st.secrets["login"]["names"].get(usuario, usuario)
+        st.write(f"Hola **:blue-background[{nombre}]** ")
+        
+        st.page_link("app.py", label="Inicio", icon=":material/home:")
+        # st.subheader("Clasificación")
+        # st.page_link("pages/table_page.py", label="Clasificación Liga F", icon=":material/trending_up:")
+        
+        st.subheader("Rankings :material/star:")
+        st.page_link("pages/rankings.py", label="Rankings de jugadores", icon=":material/star:")
+        st.page_link("pages/rankings_fisicos_skillcorner.py", label="Rankings por datos físicos de Skilcorner", icon=":material/star:")
+        st.subheader("Scouting :material/trending_up:")
+        st.page_link("pages/individual_player.py", label="Visualizador de estadísticas individuales", icon=":material/trending_up:")
+        st.page_link("pages/comparative_statistics.py", label="Visualizador de estadísticas comparativas", icon=":material/trending_up:")
+        st.subheader("Informes :material/contacts:")
+        st.page_link("pages/dashboard_opta.py", label="Generador de informes individuales", icon=":material/contacts:")
+        st.page_link("pages/dashboard_opta_comparative.py", label="Generador de informes comparativos", icon=":material/contacts:")
+        
+        
+        
+        # --- SECCIÓN ANÁLISIS DE JUEGO (Solo Admin) ---
+        if rol == "admin":
+            st.subheader("Dashboard de estadísticas de jugador")
+            st.page_link("pages/stats_dashboard.py", label="Visualizador de estadísticas globales", icon=":material/people:")
+            
+            
+            #st.page_link('pages/teams.py', label="StatsLab", icon=":material/query_stats:")
+            st.subheader("Análisis de juego :material/sports_soccer:")
+            st.page_link("pages/team_graphs_page.py", label="Visualizador de equipos", icon=":material/search:")
+            st.page_link("pages/team_page.py", label="Generador de informes", icon=":material/fact_check:")
+            
+            
+            st.subheader("Análisis de eventos del partido :material/sports_soccer:")
+            st.page_link("pages/pitch_showing.py", label="Visualizador de eventos de partido", icon=":material/search:")
+            st.page_link("pages/player_showing.py", label="Visualizador de eventos de jugador", icon=":material/search:")
+            st.page_link("pages/report_match.py", label="Informe post-partido", icon=":material/search:")
+            
+            
+            st.subheader("Análisis de Porteras :material/sports_soccer:")
+            st.page_link("pages/keepers_page.py", label="Visualizador de porteras", icon=":material/search:")
+            st.page_link("pages/Keeper_report_page.py", label="Informe de porteras", icon=":material/search:")
+            
+            
+            st.subheader("Análisis de Delanteras :material/sports_soccer:")
+            st.page_link("pages/forwards_page.py", label="Visualizador de delanteras", icon=":material/search:")
+            st.page_link("pages/Forward_report_page.py", label="Informe de delanteras", icon=":material/search:")
+            
+            st.subheader("Análisis de Corners 🚩")
+            st.page_link("pages/corners_page.py", label="Visualizador de corners", icon=":material/search:")
+            
+            st.subheader("Admin :material/manage_accounts:")
+            st.page_link("pages/users.py", label="Usuarios", icon=":material/account_circle:")
+        
+        
+
+        if st.button("Salir", type="tertiary", icon=":material/logout:"):
+            cerrarSesion()
+
+# 🔹 Función para cerrar sesión y limpiar query_params
+def cerrarSesion():
+    if 'usuario' in st.session_state:
+        del st.session_state['usuario']
+    
+    st.query_params.clear()  # 🔹 Limpia la URL
+    st.session_state.clear()
+    st.switch_page("pages/login.py")
+    st.rerun()
+
+def generarLogin():
+    # 🔄 Restaurar sesión desde la URL si existe
+    usuario_actual = st.query_params.get("user")
+
+    if usuario_actual and "usuario" not in st.session_state:
+        st.session_state['usuario'] = usuario_actual
+        
+    if 'usuario' in st.session_state:
+        st.query_params.update({"user": st.session_state["usuario"]})
+        generarMenu(st.session_state['usuario'])
+    else:
+        st.switch_page("pages/login.py")
+        

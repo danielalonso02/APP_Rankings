@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+env/
+ENV/
+secrets.toml
+.streamlit/cache/
+data/
+data_femeni/
+datos_opta/
+logs/
