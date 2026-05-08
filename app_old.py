@@ -4,171 +4,269 @@
 Created on Mon Jul 21 09:59:43 2025
 
 @author: julieta
+@collaborator: rishiraj (multi-language support and UI improvements)
 """
 
-#ESTE ES EL CÓDIGO PARA LA PAGINA INICIAL DE LA APP
+# ESTE ES EL CÓDIGO PARA LA PAGINA INICIAL DE LA APP
+
+import base64
+import os
 
 import streamlit as st
 import pandas as pd
-import numpy as np
-#from matplotlib import pyplot as plt
-#from seaborn import sns
-#import pymysql
-#pymysql.install_as_MySQLdb()
+
 from utils import login
-from PIL import Image
+from utils.styles import inject_home_css, feature_card, section_header, metric_card
+from translations import get_text
 
+
+def get_image_base64(image_path):
+    """Convert image file to base64 string for HTML embedding."""
+    try:
+        if not os.path.exists(image_path):
+            st.sidebar.error(f"Image not found: {image_path}")
+            return ""
+
+        with open(image_path, "rb") as img_file:
+            encoded = base64.b64encode(img_file.read()).decode()
+
+        ext = os.path.splitext(image_path)[1].lower()
+        if ext in ['.jpg', '.jpeg']:
+            mime_type = 'image/jpeg'
+        else:
+            mime_type = 'image/png'
+
+        return f"data:{mime_type};base64,{encoded}"
+
+    except Exception as e:
+        st.sidebar.error(f"Error loading {image_path}: {e}")
+        return ""
+
+
+# Page configuration
 st.set_page_config(
-    page_title="Web",
-    page_icon=":material/sports_and_outdoors:", #el icono
+    page_title="Liga F Analytics",
+    page_icon="⚽",
     layout="wide",
-    initial_sidebar_state="expanded" ### esto es para que de normal el sidebar este expandido
-    )
+    initial_sidebar_state="expanded"
+)
 
-# Ejecutar login con autenticación persistente
+# --- NUEVO: Ocultar menú nativo de la carpeta pages ---
+st.markdown("""
+    <style>
+        [data-testid="stSidebarNav"] {
+            display: none;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+# Inject shared CSS (sidebar + cards + nav cards + metrics)
+inject_home_css()
+
+# Execute login with persistent authentication (includes sidebar with logo)
 login.generarLogin()
 
-image2=Image.open("assets/Logos/Redes_Logo.png")
-scale = 0.32  # 90% of original size
-# Compute new size
-new_width = int(image2.width * scale)
-new_height = int(image2.height * scale)
+# ==================== HEADER SECTION ====================
+st.markdown("<br>", unsafe_allow_html=True)
 
-# Resize with high-quality resampling
-image2 = image2.resize((new_width, new_height), Image.LANCZOS)
+st.markdown(f"""
+    <div style='text-align: center; margin-bottom: 2rem;'>
+        <h1 style='color: #1e3a8a; margin-bottom: 0.5rem;'>{get_text('welcome_title')}</h1>
+        <p style='color: #64748b; font-size: 1.2rem; margin-top: 0;'>{get_text('tagline')}</p>
+    </div>
+""", unsafe_allow_html=True)
 
-col1, col2,col3, col4,col5 = st.columns([2, 1.5,1.5,1.5, 2])
-with col2:
-    st.image("assets/Logos/Redes_Logo.png")
-with col3:
-    st.image("assets/Logos/URJC_Logo.png")
-with col4:
-    st.image("assets/Logos/LigaF_Logo.png")
-    
+st.divider()
 
-st.divider() 
-st.markdown("# ⚽ Bienvenidos a la central de análisis de Liga F ")
+# ==================== MAIN CONTENT SECTION ====================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+weekly_table_path = os.path.join(BASE_DIR, "weekly_table", "weekly_table.xlsx")
+
+table_df = pd.read_excel(weekly_table_path)
+table_df["team_position"] = table_df.index + 1
 
 
-import os
-BASE_DIR = os.path.dirname(os.path.dirname(__file__)) 
-weekly_table_path=os.path.join(BASE_DIR,"weekly_table","weekly_table.xlsx")
-# Asegura existencia de la carpeta de logs
-table_df=pd.read_excel(weekly_table_path)
-table_df["team_position"]=table_df.index+1
+def fix_logo_path(path):
+    """Fix logo path to point to correct directory."""
+    filename = os.path.basename(path)
+    return os.path.join(BASE_DIR, "assets", "logos_table", filename)
+
+
+table_df["logos_path"] = table_df["logos_path"].apply(fix_logo_path)
+
+def _team_cell(logo_path, name):
+    b64 = get_image_base64(logo_path)
+    if b64:
+        return f'<img src="{b64}" width="35" height="35" style="object-fit: contain; vertical-align: middle; margin-right: 10px;"> <span style="vertical-align: middle;">{name}</span>'
+    return name
 
 df_display = pd.DataFrame({
-    "Pos": table_df["team_position"],
-    "Equipo": [
-        f'<img src="{logo}" width="40"> {name}' 
+    get_text('table_pos'): table_df["team_position"],
+    get_text('table_team'): [
+        _team_cell(logo, name)
         for logo, name in zip(table_df["logos_path"], table_df["team_name"])
     ],
-    "Puntos": table_df["team_score"]
+    get_text('table_points'): table_df["team_score"]
 })
 
-# Function to color last two positions
+
 def highlight_positions(pos):
-    if pos in df_display["Pos"].iloc[-2:].values:  # last 2
-        return 'background-color: red; color: white; font-weight: bold; text-align:center'
-    elif pos in [df_display["Pos"].iloc[0]]:  # top 1
-        return 'background-color: green; color: white; font-weight: bold; text-align:center'
-    elif pos in df_display["Pos"].iloc[1:3].values:  # 2nd & 3rd
-        return 'background-color: #90EE90; color: black; font-weight: bold; text-align:center'
+    if pos in df_display[get_text('table_pos')].iloc[-2:].values:
+        return 'background-color: #dc2626; color: white; font-weight: bold; text-align:center'
+    elif pos == df_display[get_text('table_pos')].iloc[0]:
+        return 'background-color: #16a34a; color: white; font-weight: bold; text-align:center'
+    elif pos in df_display[get_text('table_pos')].iloc[1:3].values:
+        return 'background-color: #86efac; color: black; font-weight: bold; text-align:center'
     else:
         return 'background-color: white; color: black; font-weight: bold; text-align:center'
 
-# Apply styling
+
 styled_df = (df_display.style
-             .applymap(highlight_positions, subset=['Pos'])
-             .set_properties(**{'text-align': 'left'}, subset=['Equipo','Puntos'])
-             .set_table_styles([{'selector': 'th', 'props': [('text-align', 'center')]}])
-             .hide(axis='index')
-            )
+             .map(highlight_positions, subset=[get_text('table_pos')])
+             .set_properties(**{'text-align': 'left'}, subset=[get_text('table_team'), get_text('table_points')])
+             .set_table_styles([
+                 {'selector': 'th', 'props': [('text-align', 'center'), ('font-weight', 'bold'), ('background-color', '#f1f5f9')]},
+                 {'selector': 'td', 'props': [('vertical-align', 'middle'), ('padding', '8px')]}
+             ])
+             .hide(axis='index'))
 
-# Render in Streamlit
-#st.write(styled_df.to_html(escape=False), unsafe_allow_html=True)
-BASE_DIR = os.path.dirname(os.path.dirname(__file__)) 
+col_table, col_spacer, col_text = st.columns([1.3, 0.2, 2])
 
-
-col_table, col_text = st.columns([1.5, 2])  # Adjust widths as needed
 with col_table:
-    st.markdown("## Clasificación temporada actual")
+    st.markdown(f"### {get_text('current_season_table')}")
     st.write(styled_df.to_html(escape=False), unsafe_allow_html=True)
 
 with col_text:
-    st.markdown("## Bienvenidas a la plataforma de la Liga F")
-    st.write("""El fútbol es mucho más que un juego, es un mundo de números, patrones y hallazgos. 
-             Esta plataforma proporciona análisis de datos de última generación.
-             """)
-    st.write("""El fútbol es mucho más que un juego, es un mundo de números, patrones y hallazgos. 
-         Esta plataforma proporciona análisis de datos de última generación.
-    """)
+    st.markdown(f"### {get_text('welcome_header')}")
+    st.markdown(get_text('mission_statement'))
 
-    st.write("""
-    Aquí encontrarás herramientas de **scouting** 🔍 para seguir el rendimiento de nuestras jugadoras, 
-    así como posibles fichajes, y de **análisis del rival** 🆚, con el objetivo de preparar cada partido 
-    con la máxima información posible 📊.
+    st.markdown("<br>", unsafe_allow_html=True)
+    metric_col1, metric_col2, metric_col3 = st.columns(3)
 
-    Esta plataforma es el punto de encuentro para **mejorar el rendimiento del equipo** 💪, 
-    **potenciar el talento** ⭐ y llevar a nuestros clubes a lo más alto 🏆🔥.
-    """)
-    st.write("""
+    with metric_col1:
+        metric_card("10+", get_text('analysis_tools'))
+    with metric_col2:
+        metric_card("16", get_text('teams_tracked'))
+    with metric_col3:
+        metric_card("24/25", get_text('current_season'))
 
-    Aquí encontrarás herramientas de **scouting** 🔍 para seguir el rendimiento de nuestras jugadoras, así como posibles fichajes, y de **análisis del rival** 🆚, con el objetivo de preparar cada partido con la máxima información posible 📊.
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown(f"""
+        <div style='text-align: center; margin-top: 2rem;'>
+            <p style='color: #64748b; font-size: 0.85rem; font-weight: 600; text-transform: uppercase;
+                      letter-spacing: 1px; margin-bottom: 1rem;'>
+                {get_text('built_by')}
+            </p>
+        </div>
+    """, unsafe_allow_html=True)
 
-    Esta plataforma es el punto de encuentro para **mejorar el rendimiento del equipo** 💪, **potenciar el talento** ⭐ y llevar a nuestros clubes a lo más alto 🏆🔥. """)
+    logo_col1, logo_col2, logo_col3 = st.columns(3)
+    with logo_col1:
+        st.image("assets/Logos/Redes_Logo.png", width="stretch")
+    with logo_col2:
+        st.image("assets/Logos/URJC_Logo.png", width="stretch")
+    with logo_col3:
+        st.image("assets/Logos/LigaF_Logo.png", width="stretch")
 
+st.markdown("<br><br>", unsafe_allow_html=True)
 
+# ==================== PLATFORM CAPABILITIES SECTION ====================
+section_header(get_text('platform_capabilities'))
 
+tab1, tab2, tab3, tab4 = st.tabs([
+    get_text('tab_player_analysis'),
+    get_text('tab_team_analysis'),
+    get_text('tab_match_analysis'),
+    get_text('tab_specialized')
+])
 
+with tab1:
+    col1, col2 = st.columns(2)
+    with col1:
+        feature_card(get_text('feature_individual_reports_title'), get_text('feature_individual_reports_desc'))
+        feature_card(get_text('feature_comparative_reports_title'), get_text('feature_comparative_reports_desc'))
+    with col2:
+        feature_card(get_text('feature_stats_visualizer_title'), get_text('feature_stats_visualizer_desc'))
+        feature_card(get_text('feature_player_visualizer_title'), get_text('feature_player_visualizer_desc'))
 
-st.markdown("# 🔍 Que puedes hacer en esta plaforma? ")
+with tab2:
+    col1, col2 = st.columns(2)
+    with col1:
+        feature_card(get_text('feature_team_visualizer_title'), get_text('feature_team_visualizer_desc'))
+    with col2:
+        feature_card(get_text('feature_team_report_title'), get_text('feature_team_report_desc'))
 
-st.write("""
-         📄 **Generador de Informes Individuales** – Genera informes detallados de un jugador, filtrando por liga, posición y minutos jugados.
+with tab3:
+    feature_card(get_text('feature_match_visualizer_title'), get_text('feature_match_visualizer_desc'))
 
-    📊 **Visualizador de Estadísticas** – Visualiza el rendimiento de un jugador respecto al resto de su posición en la liga, filtrando por mínimo de minutos jugados.
+with tab4:
+    col1, col2 = st.columns(2)
+    with col1:
+        feature_card(get_text('feature_goalkeeper_title'), get_text('feature_goalkeeper_desc'))
+    with col2:
+        feature_card(get_text('feature_forward_title'), get_text('feature_forward_desc'))
 
-    ⚖️ **Generador de Informes Comparativos** – Compara dos jugadores de la misma posición con estadísticas clave y métricas de desempeño.
+st.markdown("<br>", unsafe_allow_html=True)
 
-    🏟️ **Visualizador de Equipos** – Compara estadísticas de los equipos en una liga mediante gráficos interactivos en 2D.
+# ==================== NAVIGATION SECTION ====================
+section_header(get_text('get_started'))
+st.markdown(f"<p style='color: #64748b; font-size: 1.1rem; margin-bottom: 2rem;'>{get_text('get_started_desc')}</p>", unsafe_allow_html=True)
 
-    🗂️ **Generador de Informe de Equipo** – Crea informes de rivales con estadísticas detalladas del equipo al que se enfrentará.
+col1, col2, col3 = st.columns(3)
 
-    🎯 **Visualizador de Partidos** – Visualiza los eventos ocurridos durante un partido, filtrando por equipo o jugadora.
-
-    👩‍💻 **Visualizador de Jugadoras** – Analiza los eventos de una jugadora durante toda la temporada, con posibilidad de filtrar por partido.
-    
-    🧤💻 **Visualizador de Porteras** - Analiza los tiros recibidos por una portera durante las temporadas 23/24 y 24/25. 
-    
-    🧤🗂️ **Generador de Informe de Portera** - Genera informes detallados con estadísticas de los tiros que ha recibido cada portera. 
-    
-    👟💻 **Visualizador de Delanteras** - Analiza los tiros realizados por una delantera durante las temporadas 23/24 y 24/25.
-    
-    👟🗂️ **Generador de Informe de Delanteras** - Crea informes detallados con estadísticas de los tiros realizados por cada delantera.
-    """)
-# 📊 Stats Dashboard – Visualize top performers across leagues and filter by age, nationality, or team. Compare up to 3 stats in interactive 2D or 3D charts.
-# ⚖️ Player Comparison – Compare any two players side-by-side with your chosen stats using per 90 values or percentile rankings.
-# 🔍 Player Scout Report – View detailed profiles including pizza charts and customizable percentile comparisons by position or league.
-# 🧬 Player Clone – Find players with similar profiles based on selected attributes and visualize similarities in 2D or 3D space.
-# 🕵️‍♂️ Player Profiler – Identify the most suitable role for any player and see how they match global players in that profile.
-# 🧠 Player Performance Index – Discover top talent based on curated performance scores like attacking, pressing, and playmaking. Customize the index with your own weight preferences.
-# 🗂️ Player Screener – Set your own stat benchmarks to instantly find players who meet your custom criteria. Filter by percentile or raw values and discover hidden gems.
-
-
-st.write("""### **Accede a las diferentes secciones de la web a través de los siguientes enlaces 👇**
-    
-    
-""")
-st.write("")
-st.write("")
-
-col1,col2,col3=st.columns(3)
 with col1:
-    
-    st.page_link("pages/dashboard.py", label="👤 Scouting", icon=None)
+    st.markdown(f"""
+        <a href="dashboard" target="_self" style="text-decoration: none;">
+            <div class='nav-card' style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);'>
+                <div class='nav-card-content'>
+                    <div class='nav-card-icon'>👤</div>
+                    <div class='nav-card-title'>{get_text('nav_scouting_title')}</div>
+                    <div class='nav-card-description'>{get_text('nav_scouting_desc')}</div>
+                </div>
+                <div class='nav-card-button'>
+                    🔍 {get_text('nav_scouting_button')}
+                </div>
+            </div>
+        </a>
+    """, unsafe_allow_html=True)
 
 with col2:
-    st.page_link("pages/team_page.py", label="⚽️ Análisis de rival", icon=None)
+    st.markdown(f"""
+        <a href="team_page" target="_self" style="text-decoration: none;">
+            <div class='nav-card' style='background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);'>
+                <div class='nav-card-content'>
+                    <div class='nav-card-icon'>🆚</div>
+                    <div class='nav-card-title'>{get_text('nav_opponent_title')}</div>
+                    <div class='nav-card-description'>{get_text('nav_opponent_desc')}</div>
+                </div>
+                <div class='nav-card-button'>
+                    📊 {get_text('nav_opponent_button')}
+                </div>
+            </div>
+        </a>
+    """, unsafe_allow_html=True)
+
 with col3:
-    st.page_link("pages/team_graphs_page.py", label="⚽️ Visualizador de equipos", icon=None)
+    st.markdown(f"""
+        <a href="team_graphs_page" target="_self" style="text-decoration: none;">
+            <div class='nav-card' style='background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);'>
+                <div class='nav-card-content'>
+                    <div class='nav-card-icon'>⚽</div>
+                    <div class='nav-card-title'>{get_text('nav_team_viz_title')}</div>
+                    <div class='nav-card-description'>{get_text('nav_team_viz_desc')}</div>
+                </div>
+                <div class='nav-card-button'>
+                    📉 {get_text('nav_team_viz_button')}
+                </div>
+            </div>
+        </a>
+    """, unsafe_allow_html=True)
+
+# Footer
+st.markdown("<br><br>", unsafe_allow_html=True)
+st.divider()
+st.markdown(f"""
+    <div style='text-align: center; color: #94a3b8; font-size: 0.9rem;'>
+        <p>{get_text('footer_text')}</p>
+    </div>
+""", unsafe_allow_html=True)

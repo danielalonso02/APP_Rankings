@@ -284,7 +284,7 @@ with col4:
         "Rango de minutos jugados",
         min_value=min_min_abs,
         max_value=max_min_abs,
-        value=(min_min_abs // 2, max_min_abs),
+        value=(max(500, min_min_abs), max_min_abs),
         step=10,
         key="rango_minutos_ranking"
     )
@@ -905,7 +905,7 @@ with tab1:
     ctrl_a, _, ctrl_b = st.columns([1, 0.5, 1])
 
     with ctrl_a:
-        top_n_tabla = st.slider("Top N jugadoras", 1, max_jugadoras, min(max_jugadoras, max_jugadoras), 1, key="top_n_rank")
+        top_n_tabla = st.slider("Top N jugadoras", 1, max_jugadoras, min(30, max_jugadoras), 1, key="top_n_rank")
 
     with ctrl_b:
         st.markdown("Filtrar por Nota")
@@ -945,7 +945,6 @@ with tab1:
 
     @st.fragment
     def renderizar_ranking_con_seleccion(categoria_id):
-        # Esta función ahora se ejecuta dentro del contexto del tab donde es llamada
         sc = f"Score {categoria_id}"
         zs = f"Z-score {categoria_id}"
         pr = f"Percentil {categoria_id}"
@@ -972,7 +971,6 @@ with tab1:
             col_minutos: "Min"
         }).head(top_n_tabla)
 
-        # Buscador: al ser fragmento, el "Enter" no reinicia las pestañas
         busqueda = st.text_input(
             f"🔍 Buscar jugadora en {categoria_id}",
             placeholder="Escribe un nombre...",
@@ -983,10 +981,8 @@ with tab1:
             mask = df_cat["Jugadora"].str.contains(busqueda, case=False, na=False)
             df_cat = pd.concat([df_cat[mask], df_cat[~mask]]).reset_index(drop=True)
 
-        # Selección persistente
         sel_key = f"sel_nombres_{categoria_id}"
         nombres_sel = st.session_state.get(sel_key, set())
-
         df_cat.insert(0, "✓", df_cat["Jugadora"].isin(nombres_sel))
 
         fmt = {sc: "{:.1f}", pr: "{:.1f}", zs: "{:.2f}"}
@@ -1007,40 +1003,164 @@ with tab1:
             disabled=[c for c in df_cat.columns if c != "✓"],
         )
 
-        # Actualizar nombres seleccionados
         nuevos_sel = set(edited.loc[edited["✓"] == True, "Jugadora"].tolist())
         st.session_state[sel_key] = nuevos_sel
-
-        # Botón de descarga
-        df_to_download = df_cat[df_cat["Jugadora"].isin(nuevos_sel)].drop(columns=["✓"]) if nuevos_sel else df_cat.drop(columns=["✓"])
-        label_dl = f"📥 Descargar {len(nuevos_sel)} seleccionadas" if nuevos_sel else "📥 Descargar Top Completo"
-
-        excel_bytes = exportar_excel_bonito(df_to_download.reset_index(drop=True), sheet_name=f"Ranking {categoria_id}")
-        st.download_button(
-            label=label_dl,
-            data=excel_bytes,
-            file_name=_nombre_descarga(categoria_id),
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key=f"dl_{categoria_id}"
-        )
 
     # Renderizado de fragmentos dentro de sus respectivos tabs
     with tab_overall:
         renderizar_ranking_con_seleccion("Global")
-    
     with tab_ofensivo:
         renderizar_ranking_con_seleccion("Ofensivo")
-    
     with tab_defensivo:
         renderizar_ranking_con_seleccion("Defensivo")
-    
     with tab_tecnico:
         renderizar_ranking_con_seleccion("Técnico")
-    
     with tab_fisico:
         renderizar_ranking_con_seleccion("Físico")
 
-    st.info("💡 Selecciona filas en las tablas superiores para descargar solo esas jugadoras.")
+    # ── Botón de descarga único: 5 hojas en un solo Excel ────────────────────
+    st.info("💡 Selecciona filas en las tablas superiores para incluir solo esas jugadoras en la descarga.")
+
+    def _preparar_hoja(categoria_id: str) -> pd.DataFrame:
+        """Reproduce la misma lógica de filtrado que renderizar_ranking_con_seleccion."""
+        sc = f"Score {categoria_id}"
+        zs = f"Z-score {categoria_id}"
+        pr = f"Percentil {categoria_id}"
+        nt = f"Nota {categoria_id}"
+        base_cols = [c for c in [col_nombre, col_equipo, col_edad, col_posicion, col_minutos] if c]
+        df_cat = df_scored[base_cols + [sc, zs, pr]].copy().dropna(subset=[sc])
+        if pr in df_cat.columns:
+            df_cat = df_cat[df_cat[pr].apply(letra_score).isin(notas_sel)]
+        df_cat = df_cat.sort_values(sc, ascending=False)
+        if nt not in df_cat.columns:
+            df_cat.insert(df_cat.columns.get_loc(pr) + 1, nt, df_cat[pr].apply(letra_score))
+        df_cat = df_cat.rename(columns={
+            col_nombre: "Jugadora", col_equipo: "Equipo",
+            col_edad: "Edad",      col_posicion: "Posición",
+            col_minutos: "Min"
+        }).head(top_n_tabla).reset_index(drop=True)
+
+        # Aplicar selección manual si existe
+        nombres_sel = st.session_state.get(f"sel_nombres_{categoria_id}", set())
+        if nombres_sel:
+            df_cat = df_cat[df_cat["Jugadora"].isin(nombres_sel)].reset_index(drop=True)
+
+        return df_cat
+
+    def _generar_excel_completo() -> bytes:
+        from openpyxl import Workbook
+        from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+        from openpyxl.formatting.rule import ColorScaleRule
+
+        wb = Workbook()
+        wb.remove(wb.active)  # quitar hoja vacía por defecto
+
+        categorias_hojas = [
+            ("Global",    "🏆 Global"),
+            ("Ofensivo",  "⚽ Ofensivo"),
+            ("Defensivo", "🛡️ Defensivo"),
+            ("Técnico",   "🪄 Técnico"),
+            ("Físico",    "🏃 Físico"),
+        ]
+
+        header_fill  = PatternFill("solid", fgColor="1E3A8A")
+        header_font  = Font(bold=True, color="FFFFFF", size=11)
+        row_fill_alt = PatternFill("solid", fgColor="F1F5F9")
+        row_fill_wht = PatternFill("solid", fgColor="FFFFFF")
+        center_align = Alignment(horizontal="center", vertical="center")
+        left_align   = Alignment(horizontal="left",   vertical="center")
+        thin_side    = Side(style="thin", color="CBD5E1")
+        thin_border  = Border(left=thin_side, right=thin_side,
+                              top=thin_side,  bottom=thin_side)
+        text_cols    = {"Jugadora", "Equipo", "Posición", "Nota Global",
+                        "Nota Ofensivo", "Nota Defensivo", "Nota Técnico", "Nota Físico"}
+        score_kw     = ("Score", "Percentil", "Z-score")
+
+        for cat_id, sheet_title in categorias_hojas:
+            df = _preparar_hoja(cat_id)
+            ws = wb.create_sheet(title=sheet_title)
+
+            headers = ["#"] + list(df.columns)
+
+            # Cabecera
+            for col_idx, header in enumerate(headers, start=1):
+                cell = ws.cell(row=1, column=col_idx, value=header)
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = center_align
+                cell.border = thin_border
+            ws.row_dimensions[1].height = 22
+
+            # Datos
+            for row_idx, (_, row) in enumerate(df.iterrows(), start=2):
+                fill = row_fill_alt if row_idx % 2 == 0 else row_fill_wht
+                idx_cell = ws.cell(row=row_idx, column=1, value=row_idx - 1)
+                idx_cell.fill = fill
+                idx_cell.font = Font(size=10, color="64748B")
+                idx_cell.alignment = center_align
+                idx_cell.border = thin_border
+
+                for col_idx, (col_name, value) in enumerate(row.items(), start=2):
+                    cell = ws.cell(row=row_idx, column=col_idx, value=value)
+                    cell.fill = fill
+                    cell.border = thin_border
+                    cell.alignment = left_align if (col_name in text_cols or isinstance(value, str)) else center_align
+                    if isinstance(value, float):
+                        cell.number_format = "0.00"
+                        cell.font = Font(size=10)
+                    elif isinstance(value, int):
+                        cell.number_format = "0"
+                        cell.font = Font(size=10)
+                    else:
+                        cell.font = Font(size=10)
+
+            # Formato condicional en columnas de score
+            last_row = ws.max_row
+            for col_idx, col_name in enumerate(headers, start=1):
+                if any(kw in str(col_name) for kw in score_kw) and last_row > 2:
+                    col_letter = get_column_letter(col_idx)
+                    ws.conditional_formatting.add(
+                        f"{col_letter}2:{col_letter}{last_row}",
+                        ColorScaleRule(
+                            start_type="min",       start_color="EF4444",
+                            mid_type="percentile",  mid_value=50, mid_color="F59E0B",
+                            end_type="max",         end_color="10B981"
+                        )
+                    )
+
+            # Ancho automático
+            for col_idx, col_name in enumerate(headers, start=1):
+                col_letter = get_column_letter(col_idx)
+                max_len = max(
+                    len(str(col_name)),
+                    *[len(str(ws.cell(row=r, column=col_idx).value or ""))
+                      for r in range(2, last_row + 1)]
+                )
+                ws.column_dimensions[col_letter].width = min(max_len + 3, 35)
+
+            ws.freeze_panes = "A2"
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
+
+    # Calcular label del botón según selecciones activas
+    total_sel = sum(
+        len(st.session_state.get(f"sel_nombres_{c}", set()))
+        for c in ["Global", "Ofensivo", "Defensivo", "Técnico", "Físico"]
+    )
+    label_descarga = f"📥 Descargar ranking completo ({total_sel} jugadoras seleccionadas)" if total_sel else "📥 Descargar ranking completo (5 hojas)"
+
+    st.download_button(
+        label=label_descarga,
+        data=_generar_excel_completo(),
+        file_name=_nombre_descarga(),
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="dl_ranking_completo",
+        type="primary",
+        use_container_width=True,
+    )
     st.divider()
 
 with tab2:

@@ -487,7 +487,7 @@ def pizzaplot_player(wyscout_file1, wyscout_file2=None, parameters_file=None, pl
     for t in lg1.get_texts(): t.set_color(letter_color)
 
     output_path1 = f"comp_of1_{player_name1}_{player_name2}.png"
-    fig1.savefig(output_path1, dpi=500)
+    fig1.savefig(output_path1, dpi=150)
 
     # --- FIGURA 2: OFENSIVO 2 ---
     if len(values_of2_p1) > 0:
@@ -562,7 +562,7 @@ def pizzaplot_player(wyscout_file1, wyscout_file2=None, parameters_file=None, pl
         for t in lg2.get_texts(): t.set_color(letter_color)
         
         output_path2 = f"comp_of2_{player_name1}_{player_name2}.png"
-        fig2.savefig(output_path2, dpi=500)
+        fig2.savefig(output_path2, dpi=150)
     else:
         fig2, output_path2 = None, None
 
@@ -635,7 +635,7 @@ def pizzaplot_player(wyscout_file1, wyscout_file2=None, parameters_file=None, pl
     for t in lg3.get_texts(): t.set_color(letter_color)
     
     output_path3 = f"comp_def_{player_name1}_{player_name2}.png"
-    fig3.savefig(output_path3, dpi=500)
+    fig3.savefig(output_path3, dpi=150)
 
     plt.close('all')
     return fig1, output_path1, fig2, output_path2, fig3, output_path3

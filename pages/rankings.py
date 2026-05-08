@@ -152,65 +152,76 @@ st.markdown("""
 st.divider()
 
 # ==================== CARGA DE DATOS ====================
-# Recuperar df de session_state si ya fue cargado antes
-if "df_jugadoras_rankings" not in st.session_state:
-    st.session_state["df_jugadoras_rankings"] = None
-    st.session_state["df_jugadoras_rankings_nombre"] = None
+if "df_rankings_archivos" not in st.session_state:
+    st.session_state["df_rankings_archivos"] = {}
 
-df_cargado = st.session_state["df_jugadoras_rankings"]
+archivos_cargados = st.session_state["df_rankings_archivos"]
 
-if df_cargado is not None:
+if archivos_cargados:
     col_info, col_cambiar = st.columns([3, 1])
     with col_info:
-        st.success(f"✅ Datos cargados: **{st.session_state['df_jugadoras_rankings_nombre']}** "
-                   f"({len(df_cargado):,} jugadoras · {len(df_cargado.columns)} columnas)")
+        nombres = list(archivos_cargados.keys())
+        resumen = ", ".join(f"**{n}**" for n in nombres)
+        total_filas = sum(len(df) for df in archivos_cargados.values())
+        st.success(f"✅ {len(archivos_cargados)} archivo(s) cargado(s): {resumen} · {total_filas:,} jugadoras en total")
     with col_cambiar:
-        if st.button("🔄 Cambiar archivo", use_container_width=True, key="cambiar_rankings"):
-            st.session_state["df_jugadoras_rankings"] = None
-            st.session_state["df_jugadoras_rankings_nombre"] = None
+        if st.button("🔄 Cambiar archivos", use_container_width=True, key="cambiar_rankings"):
+            st.session_state["df_rankings_archivos"] = {}
             st.rerun()
 else:
-    st.info("ℹ️ Sube el archivo Excel con los datos de jugadoras para comenzar.")
-    uploaded = st.file_uploader(
-        "📂 Archivo de datos de jugadoras (.xlsx)",
+    st.info("ℹ️ Sube uno o varios archivos Excel para comenzar. Cada archivo se tratará como una liga independiente.")
+    uploaded_files = st.file_uploader(
+        "📂 Archivos de datos de jugadoras (.xlsx)",
         type=["xlsx"],
+        accept_multiple_files=True,
         key="uploader_rankings"
     )
-    if uploaded is not None:
-        try:
-            with st.spinner("Cargando datos..."):
+    if uploaded_files:
+        nuevos = {}
+        errores = []
+        for uf in uploaded_files:
+            try:
                 import io as _io_upload
-                df_tmp = pd.read_excel(_io_upload.BytesIO(uploaded.read()))
-            st.session_state["df_jugadoras_rankings"] = df_tmp
-            st.session_state["df_jugadoras_rankings_nombre"] = uploaded.name
+                df_tmp = pd.read_excel(_io_upload.BytesIO(uf.read()))
+                for col in df_tmp.columns:
+                    if df_tmp[col].dtype == object:
+                        converted = df_tmp[col].astype(str).str.replace(",", ".", regex=False)
+                        numeric = pd.to_numeric(converted, errors="coerce")
+                        if numeric.notna().sum() > df_tmp[col].notna().sum() * 0.5:
+                            df_tmp[col] = numeric
+                nuevos[uf.name] = df_tmp
+            except Exception as e:
+                errores.append(f"{uf.name}: {e}")
+        if errores:
+            for err in errores:
+                st.error(f"❌ {err}")
+        if nuevos:
+            st.session_state["df_rankings_archivos"] = nuevos
             st.rerun()
-        except Exception as e:
-            st.error(f"❌ Error al leer el archivo: {e}")
     st.stop()
 
-# A partir de aquí df_full = datos cargados por el usuario
-try:
-    df_full = df_cargado.copy()
-    # Wyscout usa coma como separador decimal en columnas numéricas → convertir
-    for col in df_full.columns:
-        if df_full[col].dtype == object:
-            converted = df_full[col].astype(str).str.replace(",", ".", regex=False)
-            numeric = pd.to_numeric(converted, errors="coerce")
-            if numeric.notna().sum() > df_full[col].notna().sum() * 0.5:
-                df_full[col] = numeric
-except Exception as e:
-    st.error(f"Error al procesar los datos: {e}")
-    st.stop()
+def _competicion_de_nombre(nombre_archivo: str) -> str:
+    """
+    Extrae un identificador único de competición a partir del nombre del archivo.
+    Patrón esperado: pais_division_YYYY_MM_DD.xlsx
+    Devuelve 'pais_division' (las dos primeras partes) para distinguir
+    argentina_1 de argentina_2, libertadores_0, etc.
+    """
+    partes = os.path.splitext(nombre_archivo)[0].split("_")
+    if len(partes) >= 2:
+        return f"{partes[0]}_{partes[1]}"
+    return partes[0]
 
-season = "24/25"  # Valor por defecto; se puede añadir un selector si se necesita
+# df_full = unión de todos los archivos, con columna _liga para identificar origen
+_dfs_con_liga = []
+for _nombre_archivo, _df_liga in archivos_cargados.items():
+    _df_tmp = _df_liga.copy()
+    _df_tmp["_liga"] = _competicion_de_nombre(_nombre_archivo)
+    _df_tmp["_archivo"] = _nombre_archivo
+    _dfs_con_liga.append(_df_tmp)
+df_full = pd.concat(_dfs_con_liga, ignore_index=True)
 
-# ── Nombre dinámico para los archivos descargados ──────────────────────────
-# Competición: primera parte del nombre del archivo cargado (antes del primer _)
-_nombre_archivo_cargado = st.session_state.get("df_jugadoras_rankings_nombre", "datos.xlsx")
-_competicion = os.path.splitext(_nombre_archivo_cargado)[0].split("_")[0]
-
-
-st.markdown("<h2 class='section-header'>Filtros</h2>", unsafe_allow_html=True)
+season = "24/25"
 
 # Diccionario de agrupación de posiciones
 POSITIONS_DICT = {
@@ -284,7 +295,7 @@ with col4:
         "Rango de minutos jugados",
         min_value=min_min_abs,
         max_value=max_min_abs,
-        value=(min_min_abs // 2, max_min_abs),
+        value=(max(500, min_min_abs), max_min_abs),
         step=10,
         key="rango_minutos_ranking"
     )
@@ -352,16 +363,17 @@ with col5:
     )
 
 
-def _nombre_descarga(sufijo: str = "") -> str:
-    """Construye: ranking_<posicion>_<competicion>[_sufijo].xlsx
-    - posicion: códigos seleccionados en el filtro (ej: CB-LCB), o 'todas' si vacío
-    - competicion: primera parte del nombre del archivo antes del primer _
-    """
+def _nombre_descarga(sufijo: str = "", competicion: str = "") -> str:
+    """Construye: ranking_<posicion>_<competicion>[_sufijo].xlsx"""
     pos_part = (
         "-".join(INV_MAP_LABELS.get(lbl, lbl) for lbl in posiciones_sel).replace(" ", "")
         if posiciones_sel else "todas"
     )
-    partes = ["ranking", pos_part, _competicion]
+    comp = competicion if competicion else (
+        _competicion_de_nombre(list(archivos_cargados.keys())[0])
+        if len(archivos_cargados) == 1 else "varias_ligas"
+    )
+    partes = ["ranking", pos_part, comp]
     if sufijo:
         partes.append(sufijo)
     return "_".join(partes) + ".xlsx"
@@ -873,9 +885,91 @@ BG_COLOR = {
 with st.spinner("Calculando scores de rendimiento..."):
     df_scored = calcular_ranking_total(df_filtered, pesos_individuales, pesos_globales)
 
+    # Calcular un df_scored independiente por cada liga con ajuste automático de minutos
+    # Si con el mínimo configurado no hay TOP_N_MINIMO jugadoras, se baja de 50 en 50 hasta lograrlo
+    TOP_N_MINIMO = 30
+    df_scored_por_liga = {}
+    df_minutos_ajustados = {}  # registra ligas donde se bajó el mínimo
+
+    for _nombre_arch, _df_liga_raw in archivos_cargados.items():
+        _competicion = _competicion_de_nombre(_nombre_arch)
+        _df_liga_base = _df_liga_raw.copy()
+        # Conversión numérica
+        for _col in _df_liga_base.columns:
+            if _df_liga_base[_col].dtype == object:
+                _converted = _df_liga_base[_col].astype(str).str.replace(",", ".", regex=False)
+                _numeric = pd.to_numeric(_converted, errors="coerce")
+                if _numeric.notna().sum() > _df_liga_base[_col].notna().sum() * 0.5:
+                    _df_liga_base[_col] = _numeric
+        if "Posición específica" in _df_liga_base.columns:
+            _df_liga_base["Grupo posición"] = _df_liga_base["Posición específica"].apply(get_grupo_posicion)
+
+        # Filtros fijos (no dependen de los minutos)
+        def _aplicar_filtros_fijos(df):
+            if equipos_sel and "Equipo durante el período seleccionado" in df.columns:
+                df = df[df["Equipo durante el período seleccionado"].isin(equipos_sel)]
+            if posiciones_sel and "Posición específica" in df.columns:
+                _pcodes = [INV_MAP_LABELS.get(lbl, lbl) for lbl in posiciones_sel]
+                df = df[df["Posición específica"].apply(
+                    lambda cell: any(p in [x.strip() for x in str(cell).split(",")]
+                                     for p in _pcodes) if pd.notna(cell) else False
+                )]
+            if grupos_sel and "Grupo posición" in df.columns:
+                df = df[df["Grupo posición"].isin(grupos_sel)]
+            if edad_activo and rango_edad is not None and "Edad" in df.columns:
+                df = df[df["Edad"].between(rango_edad[0], rango_edad[1])]
+            return df
+
+        _df_liga_fijos = _aplicar_filtros_fijos(_df_liga_base)
+
+        # Ajuste adaptativo del mínimo de minutos
+        _min_min_original = rango_minutos[0]
+        _max_min = rango_minutos[1]
+        _min_min_usado = _min_min_original
+        _df_liga = pd.DataFrame()
+
+        if "Minutos jugados" in _df_liga_fijos.columns:
+            _umbral = _min_min_original
+            while True:
+                _df_candidata = _df_liga_fijos[
+                    _df_liga_fijos["Minutos jugados"].between(_umbral, _max_min)
+                ]
+                if len(_df_candidata) >= TOP_N_MINIMO or _umbral == 0:
+                    _df_liga = _df_candidata
+                    _min_min_usado = _umbral
+                    break
+                _umbral = max(0, _umbral - 50)
+        else:
+            _df_liga = _df_liga_fijos
+
+        if _df_liga.empty:
+            continue
+
+        # Registrar ajuste aplicado
+        if _min_min_usado < _min_min_original:
+            df_minutos_ajustados[_competicion] = (_min_min_original, _min_min_usado, len(_df_liga))
+
+        _df_liga = add_per90_cols(_df_liga)
+        _df_sc = calcular_ranking_total(_df_liga, pesos_individuales, pesos_globales)
+        # Calcular z-score y percentil dentro de esta liga
+        for _cat in ["Global", "Ofensivo", "Defensivo", "Técnico", "Físico"]:
+            _sc_col = f"Score {_cat}"
+            if _sc_col in _df_sc.columns:
+                _vals = _df_sc[_sc_col].dropna()
+                if not _vals.empty:
+                    _df_sc[f"Z-score {_cat}"] = zscore(_df_sc[_sc_col], nan_policy="omit").round(2)
+                    _df_sc[f"Percentil {_cat}"] = [
+                        round(percentileofscore(_vals, v, kind="rank"), 1) if pd.notna(v) else np.nan
+                        for v in _df_sc[_sc_col]
+                    ]
+                else:
+                    _df_sc[f"Z-score {_cat}"] = np.nan
+                    _df_sc[f"Percentil {_cat}"] = np.nan
+        df_scored_por_liga[_competicion] = _df_sc
+
 score_cols_all = ["Score Ofensivo", "Score Defensivo", "Score Técnico", "Score Físico", "Score Global"]
 
-# Columnas de identidad
+# Columnas de identidad (sobre df_scored global, válido para detectar nombres de columna)
 col_nombre  = next((c for c in ["Jugador", "player_name", "Player Name"] if c in df_scored.columns), None)
 col_equipo  = next((c for c in ["Equipo durante el período seleccionado"]        if c in df_scored.columns), None)
 col_edad  = next((c for c in ["Edad", "Age", "Birthday"]        if c in df_scored.columns), None)
@@ -899,13 +993,25 @@ with tab1:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
+    # --- AVISO DE AJUSTE AUTOMÁTICO DE MINUTOS ---
+    if df_minutos_ajustados:
+        lineas = []
+        for _liga, (_orig, _usado, _n) in df_minutos_ajustados.items():
+            lineas.append(f"<b>{_liga}</b>: mínimo bajado de {_orig} a {_usado} min → {_n} jugadoras")
+        st.warning(
+            "⚠️ **Ajuste automático de minutos** — Las siguientes ligas no alcanzaban 30 jugadoras "
+            "con el filtro configurado y se redujo el mínimo automáticamente:\n\n" +
+            "\n\n".join(f"• {l}" for l in lineas),
+            icon=None
+        )
+
     # --- CONTROLES DE LA TABLA ---
     max_jugadoras = int(df_scored["Score Global"].notna().sum()) if "Score Global" in df_scored.columns else 100
     
     ctrl_a, _, ctrl_b = st.columns([1, 0.5, 1])
 
     with ctrl_a:
-        top_n_tabla = st.slider("Top N jugadoras", 1, max_jugadoras, min(max_jugadoras, max_jugadoras), 1, key="top_n_rank")
+        top_n_tabla = st.slider("Top N jugadoras", 1, max_jugadoras, min(30, max_jugadoras), 1, key="top_n_rank")
 
     with ctrl_b:
         st.markdown("Filtrar por Nota")
@@ -918,143 +1024,191 @@ with tab1:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # --- CÁLCULO DE ESTADÍSTICAS (Z-score y Percentil) ---
-    categorias = ["Global", "Ofensivo", "Defensivo", "Técnico", "Físico"]
-    for cat in categorias:
-        sc_col = f"Score {cat}"
-        if sc_col in df_scored.columns:
-            # 1. Z-SCORE GLOBAL
-            vals_global = df_scored[sc_col].dropna()
-            if not vals_global.empty:
-                from scipy.stats import zscore
-                df_scored[f"Z-score {cat}"] = zscore(df_scored[sc_col], nan_policy='omit').round(2)
-        
-            # 2. PERCENTIL
-            if not vals_global.empty:
-                df_scored[f"Percentil {cat}"] = [
-                    round(percentileofscore(vals_global, v, kind="rank"), 1) if pd.notna(v) else np.nan
-                    for v in df_scored[sc_col]
-                ]
-            else:
-                df_scored[f"Percentil {cat}"] = np.nan
-
-    # --- INTERFAZ DE NAVEGACIÓN POR PESTAÑAS ---
+    # --- INTERFAZ DE NAVEGACIÓN POR PESTAÑAS DE CATEGORÍA ---
     tab_overall, tab_ofensivo, tab_defensivo, tab_tecnico, tab_fisico = st.tabs([
         "🏆 GLOBAL", "⚽ OFENSIVO", "🛡️ DEFENSIVO", "🪄 TÉCNICO", "🏃 FÍSICO"
     ])
 
-    @st.fragment
-    def renderizar_ranking_con_seleccion(categoria_id):
+    def renderizar_ranking_liga(df_sc_liga, categoria_id, liga_key):
+        """Renderiza la tabla de ranking para una liga y categoría concretas."""
         sc = f"Score {categoria_id}"
         zs = f"Z-score {categoria_id}"
         pr = f"Percentil {categoria_id}"
         nt = f"Nota {categoria_id}"
 
         base_cols = [c for c in [col_nombre, col_equipo, col_edad, col_posicion, col_minutos] if c]
-
-        df_cat = df_scored[base_cols + [sc, zs, pr]].copy().dropna(subset=[sc])
+        available = [c for c in base_cols + [sc, zs, pr] if c in df_sc_liga.columns]
+        df_cat = df_sc_liga[available].copy().dropna(subset=[sc] if sc in available else [])
 
         if pr in df_cat.columns:
-            notas_esta_cat = df_cat[pr].apply(letra_score)
-            df_cat = df_cat[notas_esta_cat.isin(notas_sel)]
+            df_cat = df_cat[df_cat[pr].apply(letra_score).isin(notas_sel)]
 
         df_cat = df_cat.sort_values(sc, ascending=False)
 
-        if nt not in df_cat.columns:
+        if nt not in df_cat.columns and pr in df_cat.columns:
             df_cat.insert(df_cat.columns.get_loc(pr) + 1, nt, df_cat[pr].apply(letra_score))
 
-        df_cat = df_cat.rename(columns={
-            col_nombre: "Jugadora",
-            col_equipo: "Equipo",
-            col_edad: "Edad",
-            col_posicion: "Posición",
-            col_minutos: "Min"
-        }).head(top_n_tabla)
+        rename_map = {}
+        if col_nombre:   rename_map[col_nombre]   = "Jugadora"
+        if col_equipo:   rename_map[col_equipo]   = "Equipo"
+        if col_edad:     rename_map[col_edad]     = "Edad"
+        if col_posicion: rename_map[col_posicion] = "Posición"
+        if col_minutos:  rename_map[col_minutos]  = "Min"
+        df_cat = df_cat.rename(columns=rename_map).head(top_n_tabla)
 
         busqueda = st.text_input(
-            f"🔍 Buscar jugadora en {categoria_id}",
+            f"🔍 Buscar jugadora",
             placeholder="Escribe un nombre...",
-            key=f"buscar_{categoria_id}"
+            key=f"buscar_{liga_key}_{categoria_id}"
         )
         df_cat = df_cat.reset_index(drop=True)
-        if busqueda:
+        if busqueda and "Jugadora" in df_cat.columns:
             mask = df_cat["Jugadora"].str.contains(busqueda, case=False, na=False)
             df_cat = pd.concat([df_cat[mask], df_cat[~mask]]).reset_index(drop=True)
 
-        sel_key = f"sel_nombres_{categoria_id}"
-        nombres_sel = st.session_state.get(sel_key, set())
-        df_cat.insert(0, "✓", df_cat["Jugadora"].isin(nombres_sel))
+        sel_key = f"sel_nombres_{liga_key}_{categoria_id}"
+        nombres_sel_tabla = st.session_state.get(sel_key, set())
+        df_cat.insert(0, "✓", df_cat["Jugadora"].isin(nombres_sel_tabla) if "Jugadora" in df_cat.columns else False)
 
-        fmt = {sc: "{:.1f}", pr: "{:.1f}", zs: "{:.2f}"}
+        fmt = {}
+        if sc in df_cat.columns: fmt[sc] = "{:.1f}"
+        if pr in df_cat.columns: fmt[pr] = "{:.1f}"
+        if zs in df_cat.columns: fmt[zs] = "{:.2f}"
         if "Edad" in df_cat.columns: fmt["Edad"] = "{:.0f}"
         if "Min" in df_cat.columns: fmt["Min"] = "{:.0f}"
 
+        gradient_subset = [sc] if sc in df_cat.columns else []
         edited = st.data_editor(
-            df_cat.style.format(fmt, na_rep="-").background_gradient(subset=[sc], cmap="RdYlGn"),
+            df_cat.style.format(fmt, na_rep="-").background_gradient(subset=gradient_subset, cmap="RdYlGn"),
             use_container_width=True,
             height=450,
-            key=f"grid_{categoria_id}",
+            key=f"grid_{liga_key}_{categoria_id}",
             column_config={
                 "✓": st.column_config.CheckboxColumn("✓", help="Marcar para descargar", width="small"),
-                sc: st.column_config.NumberColumn(sc, format="%.1f"),
-                pr: st.column_config.NumberColumn(pr, format="%.1f"),
-                zs: st.column_config.NumberColumn(zs, format="%.2f"),
+                **({sc: st.column_config.NumberColumn(sc, format="%.1f")} if sc in df_cat.columns else {}),
+                **({pr: st.column_config.NumberColumn(pr, format="%.1f")} if pr in df_cat.columns else {}),
+                **({zs: st.column_config.NumberColumn(zs, format="%.2f")} if zs in df_cat.columns else {}),
             },
             disabled=[c for c in df_cat.columns if c != "✓"],
         )
 
-        nuevos_sel = set(edited.loc[edited["✓"] == True, "Jugadora"].tolist())
+        nuevos_sel = set(edited.loc[edited["✓"] == True, "Jugadora"].tolist()) if "Jugadora" in edited.columns else set()
         st.session_state[sel_key] = nuevos_sel
+
+    @st.fragment
+    def renderizar_categoria(categoria_id):
+        """Renderiza todas las ligas para una categoría dada."""
+        ligas_disponibles = list(df_scored_por_liga.keys())
+
+        if len(ligas_disponibles) == 1:
+            # Solo una liga: comportamiento original
+            liga = ligas_disponibles[0]
+            renderizar_ranking_liga(df_scored_por_liga[liga], categoria_id, liga_key=liga)
+        else:
+            # Varias ligas: sub-tabs, una por liga
+            sub_tabs = st.tabs([f"🏟️ {liga}" for liga in ligas_disponibles])
+            for sub_tab, liga in zip(sub_tabs, ligas_disponibles):
+                with sub_tab:
+                    renderizar_ranking_liga(df_scored_por_liga[liga], categoria_id, liga_key=liga)
 
     # Renderizado de fragmentos dentro de sus respectivos tabs
     with tab_overall:
-        renderizar_ranking_con_seleccion("Global")
+        renderizar_categoria("Global")
     with tab_ofensivo:
-        renderizar_ranking_con_seleccion("Ofensivo")
+        renderizar_categoria("Ofensivo")
     with tab_defensivo:
-        renderizar_ranking_con_seleccion("Defensivo")
+        renderizar_categoria("Defensivo")
     with tab_tecnico:
-        renderizar_ranking_con_seleccion("Técnico")
+        renderizar_categoria("Técnico")
     with tab_fisico:
-        renderizar_ranking_con_seleccion("Físico")
+        renderizar_categoria("Físico")
 
-    # ── Botón de descarga único: 5 hojas en un solo Excel ────────────────────
+
+    # ── Botón de descarga: ZIP con un Excel por liga, 5 hojas cada uno ────────
     st.info("💡 Selecciona filas en las tablas superiores para incluir solo esas jugadoras en la descarga.")
 
-    def _preparar_hoja(categoria_id: str) -> pd.DataFrame:
-        """Reproduce la misma lógica de filtrado que renderizar_ranking_con_seleccion."""
+    def _preparar_hoja(df_scored_liga, categoria_id: str, liga_key: str = "") -> pd.DataFrame:
         sc = f"Score {categoria_id}"
         zs = f"Z-score {categoria_id}"
         pr = f"Percentil {categoria_id}"
         nt = f"Nota {categoria_id}"
         base_cols = [c for c in [col_nombre, col_equipo, col_edad, col_posicion, col_minutos] if c]
-        df_cat = df_scored[base_cols + [sc, zs, pr]].copy().dropna(subset=[sc])
+        available = [c for c in base_cols + [sc, zs, pr] if c in df_scored_liga.columns]
+        df_cat = df_scored_liga[available].copy().dropna(subset=[sc] if sc in available else [])
         if pr in df_cat.columns:
             df_cat = df_cat[df_cat[pr].apply(letra_score).isin(notas_sel)]
-        df_cat = df_cat.sort_values(sc, ascending=False)
-        if nt not in df_cat.columns:
+        if sc in df_cat.columns:
+            df_cat = df_cat.sort_values(sc, ascending=False)
+        if nt not in df_cat.columns and pr in df_cat.columns:
             df_cat.insert(df_cat.columns.get_loc(pr) + 1, nt, df_cat[pr].apply(letra_score))
-        df_cat = df_cat.rename(columns={
-            col_nombre: "Jugadora", col_equipo: "Equipo",
-            col_edad: "Edad",      col_posicion: "Posición",
-            col_minutos: "Min"
-        }).head(top_n_tabla).reset_index(drop=True)
-
-        # Aplicar selección manual si existe
-        nombres_sel = st.session_state.get(f"sel_nombres_{categoria_id}", set())
-        if nombres_sel:
-            df_cat = df_cat[df_cat["Jugadora"].isin(nombres_sel)].reset_index(drop=True)
-
+        rename_map = {}
+        if col_nombre:   rename_map[col_nombre]   = "Jugadora"
+        if col_equipo:   rename_map[col_equipo]   = "Equipo"
+        if col_edad:     rename_map[col_edad]     = "Edad"
+        if col_posicion: rename_map[col_posicion] = "Posición"
+        if col_minutos:  rename_map[col_minutos]  = "Min"
+        df_cat = df_cat.rename(columns=rename_map).head(top_n_tabla).reset_index(drop=True)
+        # Usar clave de selección por liga si está disponible, si no caer al formato antiguo
+        sel_key = f"sel_nombres_{liga_key}_{categoria_id}" if liga_key else f"sel_nombres_{categoria_id}"
+        nombres_sel_cat = st.session_state.get(sel_key, set())
+        if nombres_sel_cat and "Jugadora" in df_cat.columns:
+            df_cat = df_cat[df_cat["Jugadora"].isin(nombres_sel_cat)].reset_index(drop=True)
         return df_cat
 
-    def _generar_excel_completo() -> bytes:
-        from openpyxl import Workbook
+    def _escribir_hoja_excel(wb, df, sheet_title):
         from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
         from openpyxl.utils import get_column_letter
         from openpyxl.formatting.rule import ColorScaleRule
+        ws = wb.create_sheet(title=sheet_title[:31])
+        header_fill  = PatternFill("solid", fgColor="1E3A8A")
+        header_font  = Font(bold=True, color="FFFFFF", size=11)
+        row_fill_alt = PatternFill("solid", fgColor="F1F5F9")
+        row_fill_wht = PatternFill("solid", fgColor="FFFFFF")
+        center_align = Alignment(horizontal="center", vertical="center")
+        left_align   = Alignment(horizontal="left",   vertical="center")
+        thin_side    = Side(style="thin", color="CBD5E1")
+        thin_border  = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+        text_cols    = {"Jugadora", "Equipo", "Posición"}
+        score_kw     = ("Score", "Percentil", "Z-score")
+        headers = ["#"] + list(df.columns)
+        for col_idx, header in enumerate(headers, start=1):
+            cell = ws.cell(row=1, column=col_idx, value=header)
+            cell.fill = header_fill; cell.font = header_font
+            cell.alignment = center_align; cell.border = thin_border
+        ws.row_dimensions[1].height = 22
+        for row_idx, (_, row) in enumerate(df.iterrows(), start=2):
+            fill = row_fill_alt if row_idx % 2 == 0 else row_fill_wht
+            idx_cell = ws.cell(row=row_idx, column=1, value=row_idx - 1)
+            idx_cell.fill = fill; idx_cell.font = Font(size=10, color="64748B")
+            idx_cell.alignment = center_align; idx_cell.border = thin_border
+            for col_idx, (col_name, value) in enumerate(row.items(), start=2):
+                cell = ws.cell(row=row_idx, column=col_idx, value=value)
+                cell.fill = fill; cell.border = thin_border
+                cell.alignment = left_align if (col_name in text_cols or isinstance(value, str)) else center_align
+                cell.font = Font(size=10)
+                if isinstance(value, float): cell.number_format = "0.00"
+                elif isinstance(value, int): cell.number_format = "0"
+        last_row = ws.max_row
+        for col_idx, col_name in enumerate(headers, start=1):
+            if any(kw in str(col_name) for kw in score_kw) and last_row > 2:
+                col_letter = get_column_letter(col_idx)
+                ws.conditional_formatting.add(
+                    f"{col_letter}2:{col_letter}{last_row}",
+                    ColorScaleRule(start_type="min", start_color="EF4444",
+                                   mid_type="percentile", mid_value=50, mid_color="F59E0B",
+                                   end_type="max", end_color="10B981")
+                )
+        for col_idx, col_name in enumerate(headers, start=1):
+            col_letter = get_column_letter(col_idx)
+            max_len = max(len(str(col_name)),
+                          *[len(str(ws.cell(row=r, column=col_idx).value or ""))
+                            for r in range(2, last_row + 1)])
+            ws.column_dimensions[col_letter].width = min(max_len + 3, 35)
+        ws.freeze_panes = "A2"
 
-        wb = Workbook()
-        wb.remove(wb.active)  # quitar hoja vacía por defecto
+    def _generar_zip_ligas() -> bytes:
+        import zipfile
+        from openpyxl import Workbook
 
         categorias_hojas = [
             ("Global",    "🏆 Global"),
@@ -1063,101 +1217,53 @@ with tab1:
             ("Técnico",   "🪄 Técnico"),
             ("Físico",    "🏃 Físico"),
         ]
+        zip_buf = io.BytesIO()
+        with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for competicion, df_scored_liga in df_scored_por_liga.items():
+                # Crear Excel con 5 hojas usando los datos ya calculados
+                wb = Workbook()
+                wb.remove(wb.active)
+                for cat_id, sheet_title in categorias_hojas:
+                    df_hoja = _preparar_hoja(df_scored_liga, cat_id, liga_key=competicion)
+                    _escribir_hoja_excel(wb, df_hoja, sheet_title)
+                excel_buf = io.BytesIO()
+                wb.save(excel_buf)
+                zf.writestr(_nombre_descarga(competicion=competicion), excel_buf.getvalue())
+        return zip_buf.getvalue()
 
-        header_fill  = PatternFill("solid", fgColor="1E3A8A")
-        header_font  = Font(bold=True, color="FFFFFF", size=11)
-        row_fill_alt = PatternFill("solid", fgColor="F1F5F9")
-        row_fill_wht = PatternFill("solid", fgColor="FFFFFF")
-        center_align = Alignment(horizontal="center", vertical="center")
-        left_align   = Alignment(horizontal="left",   vertical="center")
-        thin_side    = Side(style="thin", color="CBD5E1")
-        thin_border  = Border(left=thin_side, right=thin_side,
-                              top=thin_side,  bottom=thin_side)
-        text_cols    = {"Jugadora", "Equipo", "Posición", "Nota Global",
-                        "Nota Ofensivo", "Nota Defensivo", "Nota Técnico", "Nota Físico"}
-        score_kw     = ("Score", "Percentil", "Z-score")
-
-        for cat_id, sheet_title in categorias_hojas:
-            df = _preparar_hoja(cat_id)
-            ws = wb.create_sheet(title=sheet_title)
-
-            headers = ["#"] + list(df.columns)
-
-            # Cabecera
-            for col_idx, header in enumerate(headers, start=1):
-                cell = ws.cell(row=1, column=col_idx, value=header)
-                cell.fill = header_fill
-                cell.font = header_font
-                cell.alignment = center_align
-                cell.border = thin_border
-            ws.row_dimensions[1].height = 22
-
-            # Datos
-            for row_idx, (_, row) in enumerate(df.iterrows(), start=2):
-                fill = row_fill_alt if row_idx % 2 == 0 else row_fill_wht
-                idx_cell = ws.cell(row=row_idx, column=1, value=row_idx - 1)
-                idx_cell.fill = fill
-                idx_cell.font = Font(size=10, color="64748B")
-                idx_cell.alignment = center_align
-                idx_cell.border = thin_border
-
-                for col_idx, (col_name, value) in enumerate(row.items(), start=2):
-                    cell = ws.cell(row=row_idx, column=col_idx, value=value)
-                    cell.fill = fill
-                    cell.border = thin_border
-                    cell.alignment = left_align if (col_name in text_cols or isinstance(value, str)) else center_align
-                    if isinstance(value, float):
-                        cell.number_format = "0.00"
-                        cell.font = Font(size=10)
-                    elif isinstance(value, int):
-                        cell.number_format = "0"
-                        cell.font = Font(size=10)
-                    else:
-                        cell.font = Font(size=10)
-
-            # Formato condicional en columnas de score
-            last_row = ws.max_row
-            for col_idx, col_name in enumerate(headers, start=1):
-                if any(kw in str(col_name) for kw in score_kw) and last_row > 2:
-                    col_letter = get_column_letter(col_idx)
-                    ws.conditional_formatting.add(
-                        f"{col_letter}2:{col_letter}{last_row}",
-                        ColorScaleRule(
-                            start_type="min",       start_color="EF4444",
-                            mid_type="percentile",  mid_value=50, mid_color="F59E0B",
-                            end_type="max",         end_color="10B981"
-                        )
-                    )
-
-            # Ancho automático
-            for col_idx, col_name in enumerate(headers, start=1):
-                col_letter = get_column_letter(col_idx)
-                max_len = max(
-                    len(str(col_name)),
-                    *[len(str(ws.cell(row=r, column=col_idx).value or ""))
-                      for r in range(2, last_row + 1)]
-                )
-                ws.column_dimensions[col_letter].width = min(max_len + 3, 35)
-
-            ws.freeze_panes = "A2"
-
-        buf = io.BytesIO()
-        wb.save(buf)
-        return buf.getvalue()
-
-    # Calcular label del botón según selecciones activas
-    total_sel = sum(
-        len(st.session_state.get(f"sel_nombres_{c}", set()))
-        for c in ["Global", "Ofensivo", "Defensivo", "Técnico", "Físico"]
+    # Nombre del ZIP y label del botón
+    pos_part = (
+        "-".join(INV_MAP_LABELS.get(lbl, lbl) for lbl in posiciones_sel).replace(" ", "")
+        if posiciones_sel else "todas"
     )
-    label_descarga = f"📥 Descargar ranking completo ({total_sel} jugadoras seleccionadas)" if total_sel else "📥 Descargar ranking completo (5 hojas)"
-
+    n_ligas = len(df_scored_por_liga)
+    nombre_zip = (
+        f"rankings_{pos_part}.zip" if n_ligas > 1
+        else _nombre_descarga(competicion=list(df_scored_por_liga.keys())[0]).replace(".xlsx", ".zip")
+    )
+    total_sel = sum(
+        len(st.session_state.get(f"sel_nombres_{liga}_{cat}", set()))
+        for liga in df_scored_por_liga
+        for cat in ["Global", "Ofensivo", "Defensivo", "Técnico", "Físico"]
+    )
+    if n_ligas > 1:
+        label_descarga = (
+            f"📥 Descargar rankings — {n_ligas} Excel independientes (1 por liga · 5 hojas cada uno)"
+            if not total_sel else
+            f"📥 Descargar rankings — {n_ligas} ligas · {total_sel} jugadoras seleccionadas"
+        )
+    else:
+        label_descarga = (
+            f"📥 Descargar rankings · 5 hojas"
+            if not total_sel else
+            f"📥 Descargar rankings ({total_sel} jugadoras seleccionadas)"
+        )
     st.download_button(
         label=label_descarga,
-        data=_generar_excel_completo(),
-        file_name=_nombre_descarga(),
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        key="dl_ranking_completo",
+        data=_generar_zip_ligas(),
+        file_name=nombre_zip,
+        mime="application/zip",
+        key="dl_ranking_zip",
         type="primary",
         use_container_width=True,
     )

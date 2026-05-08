@@ -23,13 +23,11 @@ inject_login_css()
 
 
 
-col1, col2,col3, col4,col5 = st.columns([2, 1.5,1.5,1.5, 2])
+col1, col2,col3,col5 = st.columns([2, 1.5,1.5, 2])
 with col2:
     st.image("assets/Logos/Redes_Logo.png")
 with col3:
     st.image("assets/Logos/URJC_Logo.png")
-with col4:
-    st.image("assets/Logos/LigaF_Logo.png")
     
     #st.text("¡Bienvenido!")
 
