@@ -634,7 +634,6 @@ def cargar_pesos_por_posicion(ruta: str, posicion: str) -> dict:
 
 # Inicialización de estados para evitar NameError y permitir sincronización
 if "posicion_previa" not in st.session_state: st.session_state["posicion_previa"] = []
-if "posiciones_especificas_previas" not in st.session_state: st.session_state["posiciones_especificas_previas"] = []
 if "w_of_val" not in st.session_state: st.session_state["w_of_val"] = 0.25
 if "w_def_val" not in st.session_state: st.session_state["w_def_val"] = 0.25
 if "w_tec_val" not in st.session_state: st.session_state["w_tec_val"] = 0.25
@@ -651,62 +650,40 @@ for _key in ["sel_nombres_Global", "sel_nombres_Ofensivo", "sel_nombres_Defensiv
 if "tab_ranking_activa" not in st.session_state:
     st.session_state["tab_ranking_activa"] = 0
 
-# Mapeo: Nombre de grupo -> Nombre en la columna 'description' del Excel Global
-_MAP_MACRO = {
-    "Delantero": "Delantero centro",
-    "Mediocampista ofensivo": "Mediocampista ofensivo",
-    "Mediocampista defensivo": "Mediocampista defensivo",
-    "Defensa central": "Defensa central",
-    "Lateral": "Lateral",
-    "Extremo": "Extremo",
-    "Portero": "Portero"
-}
-
-def _cargar_pesos_para_grupo(grupo_activo):
-    """Carga Nivel 1 (macro) y Nivel 2 (micro) para un grupo de posición dado."""
-    nombre_macro = _MAP_MACRO.get(grupo_activo, grupo_activo)
-    m_vals = cargar_pesos_macro_tabla(str(ruta_pesos_macro), nombre_macro)
-    if m_vals:
-        st.session_state["w_of_val"] = m_vals["Ofensivo"]
-        st.session_state["w_def_val"] = m_vals["Defensivo"]
-        st.session_state["w_tec_val"] = m_vals["Técnico"]
-        st.session_state["w_fis_val"] = m_vals["Físico"]
-    p_vals = cargar_pesos_por_posicion(str(ruta_pesos), grupo_activo)
-    if p_vals:
-        for cat, metricas in p_vals.items():
-            for m, v in metricas.items():
-                st.session_state[f"slider_{cat}_{m}"] = float(v)
-
 # --- LÓGICA DE SINCRONIZACIÓN AUTOMÁTICA (Filtro -> Sliders) ---
-# Detecta cambio en posición específica o grupo de posición y ajusta pesos automáticamente.
-# Prioridad: posiciones específicas > grupos de posición.
-# Solo actúa cuando hay exactamente un grupo resoluble (unívoco).
+if grupos_sel != st.session_state["posicion_previa"]:
+    if len(grupos_sel) == 1:
+        grupo_activo = grupos_sel[0]
+        
+        # Mapeo: Nombre en el filtro -> Nombre en la columna 'description' del Excel Global
+        map_macro = {
+            "Delantero": "Delantero centro",
+            "Mediocampista ofensivo": "Mediocampista ofensivo",
+            "Mediocampista defensivo": "Mediocampista defensivo",
+            "Defensa central": "Defensa central",
+            "Lateral": "Lateral",
+            "Extremo": "Extremo",
+            "Portero": "Portero"
+        }
+        nombre_macro = map_macro.get(grupo_activo, grupo_activo)
+        
+        # 1. Cargar Macro y actualizar los KEYS de los sliders directamente
+        m_vals = cargar_pesos_macro_tabla(str(ruta_pesos_macro), nombre_macro)
+        if m_vals:
+            st.session_state["w_of_val"] = m_vals["Ofensivo"]
+            st.session_state["w_def_val"] = m_vals["Defensivo"]
+            st.session_state["w_tec_val"] = m_vals["Técnico"]
+            st.session_state["w_fis_val"] = m_vals["Físico"]
 
-_posiciones_sel_codes = [INV_MAP_LABELS.get(lbl, lbl) for lbl in posiciones_sel]
-_grupos_desde_posiciones = list({POSITIONS_DICT[cod] for cod in _posiciones_sel_codes if cod in POSITIONS_DICT})
-
-_filtro_actual_pos = sorted(posiciones_sel)
-_filtro_actual_grp = sorted(grupos_sel)
-
-_cambio_posicion = _filtro_actual_pos != st.session_state["posiciones_especificas_previas"]
-_cambio_grupo    = _filtro_actual_grp != st.session_state["posicion_previa"]
-
-if _cambio_posicion or _cambio_grupo:
-    # Determinar el grupo de referencia unívoco
-    if posiciones_sel:
-        # Posiciones específicas seleccionadas → inferir grupo(s)
-        if len(_grupos_desde_posiciones) == 1:
-            # Todas las posiciones seleccionadas pertenecen al mismo grupo → cargar ese grupo
-            _cargar_pesos_para_grupo(_grupos_desde_posiciones[0])
-        # Si son de grupos distintos → no autocargar (ambiguo), pero sí actualizar estado
-    elif len(grupos_sel) == 1:
-        # Solo grupo de posición seleccionado sin posiciones específicas
-        _cargar_pesos_para_grupo(grupos_sel[0])
-    # Si hay múltiples grupos sin posiciones específicas → no autocargar
-
-    st.session_state["posicion_previa"] = _filtro_actual_grp
-    st.session_state["posiciones_especificas_previas"] = _filtro_actual_pos
-    st.rerun()
+        # 2. Cargar Micro (Nivel 2)
+        p_vals = cargar_pesos_por_posicion(str(ruta_pesos), grupo_activo)
+        if p_vals:
+            for cat, metricas in p_vals.items():
+                for m, v in metricas.items():
+                    st.session_state[f"slider_{cat}_{m}"] = float(v)
+        
+        st.session_state["posicion_previa"] = grupos_sel
+        st.rerun()
 
 # ==================== NIVEL 1: PESOS GLOBALES (MACRO) ====================
 with st.expander("⚖️ NIVEL 1: Importancia de los Bloques"):
