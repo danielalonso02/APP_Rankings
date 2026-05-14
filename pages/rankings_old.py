@@ -471,6 +471,16 @@ def add_per90_cols(df: pd.DataFrame) -> pd.DataFrame:
         "Pérdidas de balón /90":         "Acciones defensivas realizadas/90",
         "Ocasiones falladas /90":        "Acciones de ataque exitosas/90",
         "Faltas recibidas /90":          "Faltas recibidas/90",
+        # Portero
+        "GK Goles recibidos /90":        "Goles recibidos/90",
+        "GK Remates en contra /90":      "Remates en contra/90",
+        "GK Portería imbatida /90":      "Portería imbatidas en los 90",
+        "GK Paradas %":                  "Paradas, %",
+        "GK xG en contra /90":           "xG en contra/90",
+        "GK Goles evitados /90":         "Goles evitados/90",
+        "GK Salidas /90":                "Salidas/90",
+        "GK Duelos aéreos /90":          "Duelos aéreos en los 90.1",
+        "GK Pases atrás recibidos /90":  "Pases hacía atrás recibidos del arquero/90",
     }
 
     # Renombrado con conversión numérica segura
@@ -634,6 +644,7 @@ def cargar_pesos_por_posicion(ruta: str, posicion: str) -> dict:
 
 # Inicialización de estados para evitar NameError y permitir sincronización
 if "posicion_previa" not in st.session_state: st.session_state["posicion_previa"] = []
+if "posiciones_especificas_previas" not in st.session_state: st.session_state["posiciones_especificas_previas"] = []
 if "w_of_val" not in st.session_state: st.session_state["w_of_val"] = 0.25
 if "w_def_val" not in st.session_state: st.session_state["w_def_val"] = 0.25
 if "w_tec_val" not in st.session_state: st.session_state["w_tec_val"] = 0.25
@@ -650,165 +661,84 @@ for _key in ["sel_nombres_Global", "sel_nombres_Ofensivo", "sel_nombres_Defensiv
 if "tab_ranking_activa" not in st.session_state:
     st.session_state["tab_ranking_activa"] = 0
 
+# Mapeo: Nombre de grupo -> Nombre en la columna 'description' del Excel Global
+_MAP_MACRO = {
+    "Delantero": "Delantero centro",
+    "Mediocampista ofensivo": "Mediocampista ofensivo",
+    "Mediocampista defensivo": "Mediocampista defensivo",
+    "Defensa central": "Defensa central",
+    "Lateral": "Lateral",
+    "Extremo": "Extremo",
+    "Portero": "Portero"
+}
+
+def _cargar_pesos_para_grupo(grupo_activo):
+    """Carga Nivel 1 (macro) y Nivel 2 (micro) para un grupo de posición dado."""
+    nombre_macro = _MAP_MACRO.get(grupo_activo, grupo_activo)
+    m_vals = cargar_pesos_macro_tabla(str(ruta_pesos_macro), nombre_macro)
+    if m_vals:
+        st.session_state["w_of_val"] = m_vals["Ofensivo"]
+        st.session_state["w_def_val"] = m_vals["Defensivo"]
+        st.session_state["w_tec_val"] = m_vals["Técnico"]
+        st.session_state["w_fis_val"] = m_vals["Físico"]
+    p_vals = cargar_pesos_por_posicion(str(ruta_pesos), grupo_activo)
+    if p_vals:
+        for cat, metricas in p_vals.items():
+            for m, v in metricas.items():
+                st.session_state[f"slider_{cat}_{m}"] = float(v)
+
 # --- LÓGICA DE SINCRONIZACIÓN AUTOMÁTICA (Filtro -> Sliders) ---
-if grupos_sel != st.session_state["posicion_previa"]:
-    if len(grupos_sel) == 1:
-        grupo_activo = grupos_sel[0]
-        
-        # Mapeo: Nombre en el filtro -> Nombre en la columna 'description' del Excel Global
-        map_macro = {
-            "Delantero": "Delantero centro",
-            "Mediocampista ofensivo": "Mediocampista ofensivo",
-            "Mediocampista defensivo": "Mediocampista defensivo",
-            "Defensa central": "Defensa central",
-            "Lateral": "Lateral",
-            "Extremo": "Extremo",
-            "Portero": "Portero"
-        }
-        nombre_macro = map_macro.get(grupo_activo, grupo_activo)
-        
-        # 1. Cargar Macro y actualizar los KEYS de los sliders directamente
-        m_vals = cargar_pesos_macro_tabla(str(ruta_pesos_macro), nombre_macro)
-        if m_vals:
-            st.session_state["w_of_val"] = m_vals["Ofensivo"]
-            st.session_state["w_def_val"] = m_vals["Defensivo"]
-            st.session_state["w_tec_val"] = m_vals["Técnico"]
-            st.session_state["w_fis_val"] = m_vals["Físico"]
+# Detecta cambio en posición específica o grupo de posición y ajusta pesos automáticamente.
+# Prioridad: posiciones específicas > grupos de posición.
+# Solo actúa cuando hay exactamente un grupo resoluble (unívoco).
 
-        # 2. Cargar Micro (Nivel 2)
-        p_vals = cargar_pesos_por_posicion(str(ruta_pesos), grupo_activo)
-        if p_vals:
-            for cat, metricas in p_vals.items():
-                for m, v in metricas.items():
-                    st.session_state[f"slider_{cat}_{m}"] = float(v)
-        
-        st.session_state["posicion_previa"] = grupos_sel
-        st.rerun()
+_posiciones_sel_codes = [INV_MAP_LABELS.get(lbl, lbl) for lbl in posiciones_sel]
+_grupos_desde_posiciones = list({POSITIONS_DICT[cod] for cod in _posiciones_sel_codes if cod in POSITIONS_DICT})
 
-# ==================== NIVEL 1: PESOS GLOBALES (MACRO) ====================
-with st.expander("⚖️ NIVEL 1: Importancia de los Bloques"):
-    
-    # --- SECCIÓN DE FAVORITOS (CON BORRADO) ---
-    st.markdown("<p style='font-weight: bold; color: #1e3a8a;'>⭐ Mis Configuraciones Guardadas</p>", unsafe_allow_html=True)
-    
-    # Ajustamos columnas: Selectbox, Cargar, Eliminar, Guardar
-    f_col1, f_col2, f_col3, f_col4 = st.columns([2, 0.8, 0.8, 2])
-    
-    with f_col1:
-        mis_favs = cargar_favoritos()
-        nombre_sel = st.selectbox(
-            "Cargar favorito:", 
-            ["Seleccionar..."] + list(mis_favs.keys()),
-            label_visibility="collapsed"
-        )
-    
-    with f_col2:
-        # Botón Cargar
-        if st.button("📥 Cargar", use_container_width=True, disabled=nombre_sel=="Seleccionar..."):
-            aplicar_favorito(nombre_sel)
-            st.rerun()
-            
-    with f_col3:
-        # Botón Eliminar
-        if st.button("🗑️ Eliminar", use_container_width=True, help="Eliminar esta configuración", disabled=nombre_sel=="Seleccionar..."):
-            if eliminar_favorito(nombre_sel):
-                st.toast(f"'{nombre_sel}' eliminado")
-                st.rerun()
-            
-    with f_col4:
-        col_txt, col_btn_save = st.columns([1.2, 1])
-        with col_txt:
-            nuevo_fav = st.text_input("Nombre nuevo", placeholder="Nombre...", label_visibility="collapsed", key="input_nuevo_fav")
-        with col_btn_save:
-            if st.button("💾 Guardar", use_container_width=True):
-                if nuevo_fav:
-                    w_glob = {
-                        "Ofensivo": st.session_state.get("w_of_val", 0.25), 
-                        "Defensivo": st.session_state.get("w_def_val", 0.25), 
-                        "Técnico": st.session_state.get("w_tec_val", 0.25), 
-                        "Físico": st.session_state.get("w_fis_val", 0.25)
-                    }
-                    w_mic = {k: v for k, v in st.session_state.items() if k.startswith("slider_")}
-                    guardar_favorito(nuevo_fav, w_glob, w_mic)
-                    st.toast(f"¡{nuevo_fav} guardado!")
-                    st.rerun()
-                else:
-                    st.warning("Escribe un nombre")
-    
-    st.divider()
+_filtro_actual_pos = sorted(posiciones_sel)
+_filtro_actual_grp = sorted(grupos_sel)
 
-    # --- TUS PREDEFINIDOS ORIGINALES (MANTENIDOS) ---
-    st.markdown("<p style='font-weight: bold;'>🎯 Perfiles predefinidos por posición (Excel):</p>", unsafe_allow_html=True)
+_cambio_posicion = _filtro_actual_pos != st.session_state["posiciones_especificas_previas"]
+_cambio_grupo    = _filtro_actual_grp != st.session_state["posicion_previa"]
 
-    posiciones_macro = ["Portero", "Defensa central", "Lateral", "Mediocampista defensivo", 
-                        "Mediocampista ofensivo", "Extremo", "Delantero centro"]
+if _cambio_posicion or _cambio_grupo:
+    # Determinar el grupo de referencia unívoco
+    if posiciones_sel:
+        # Posiciones específicas seleccionadas → inferir grupo(s)
+        if len(_grupos_desde_posiciones) == 1:
+            # Todas las posiciones seleccionadas pertenecen al mismo grupo → cargar ese grupo
+            _cargar_pesos_para_grupo(_grupos_desde_posiciones[0])
+        # Si son de grupos distintos → no autocargar (ambiguo), pero sí actualizar estado
+    elif len(grupos_sel) == 1:
+        # Solo grupo de posición seleccionado sin posiciones específicas
+        _cargar_pesos_para_grupo(grupos_sel[0])
+    # Si hay múltiples grupos sin posiciones específicas → no autocargar
 
-    cols_macro = st.columns(4)
-    for i, pos_name in enumerate(posiciones_macro):
-        with cols_macro[i % 4]:
-            if st.button(pos_name, key=f"macro_btn_{pos_name}", use_container_width=True):
-                m_vals = cargar_pesos_macro_tabla(str(ruta_pesos_macro), pos_name)
-                if m_vals:
-                    st.session_state["w_of_val"] = m_vals["Ofensivo"]
-                    st.session_state["w_def_val"] = m_vals["Defensivo"]
-                    st.session_state["w_tec_val"] = m_vals["Técnico"]
-                    st.session_state["w_fis_val"] = m_vals["Físico"]
-                    st.rerun()
+    st.session_state["posicion_previa"] = _filtro_actual_grp
+    st.session_state["posiciones_especificas_previas"] = _filtro_actual_pos
+    st.rerun()
 
-    st.divider()
-    
-    # --- SLIDERS DE CONTROL ---
-    c_g1, c_g2, c_g3, c_g4 = st.columns(4)
-    with c_g1: 
-        w_of = st.slider("⚽ Ofensivo", 0.0, 1.0, key="w_of_val", step=0.05)
-    with c_g2: 
-        w_def = st.slider("🛡️ Defensivo", 0.0, 1.0, key="w_def_val", step=0.05)
-    with c_g3: 
-        w_tec = st.slider("🪄 Técnico", 0.0, 1.0, key="w_tec_val", step=0.05)
-    with c_g4: 
-        w_fis = st.slider("🏃 Físico", 0.0, 1.0, key="w_fis_val", step=0.05)
+# Los pesos se inicializan aquí con valores por defecto si no están en session_state.
+# Los expanders de configuración se muestran dentro de cada tab donde aplican.
+_sum_w_init = (
+    st.session_state.get("w_of_val", 0.25) +
+    st.session_state.get("w_def_val", 0.25) +
+    st.session_state.get("w_tec_val", 0.25) +
+    st.session_state.get("w_fis_val", 0.25)
+) or 1
+pesos_globales = {
+    "Ofensivo":  st.session_state.get("w_of_val", 0.25) / _sum_w_init,
+    "Defensivo": st.session_state.get("w_def_val", 0.25) / _sum_w_init,
+    "Técnico":   st.session_state.get("w_tec_val", 0.25) / _sum_w_init,
+    "Físico":    st.session_state.get("w_fis_val", 0.25) / _sum_w_init,
+}
 
-    sum_w = (w_of + w_def + w_tec + w_fis) or 1
-    pesos_globales = {
-        "Ofensivo": w_of/sum_w, 
-        "Defensivo": w_def/sum_w, 
-        "Técnico": w_tec/sum_w, 
-        "Físico": w_fis/sum_w
-    }
-
-# ==================== NIVEL 2: PESOS POR ESTADÍSTICA (MICRO) ====================
-with st.expander("🛠️ NIVEL 2: Ajuste del peso individual de cada estadística"):
-    st.markdown("<p style='font-weight: bold;'>📊 Cargar pesos por posición (Pestañas Excel):</p>", unsafe_allow_html=True)
-    
-    hojas_excel = ["Defensa central", "Lateral", "Mediocampista defensivo", "Mediocampista ofensivo", "Extremo", "Delantero"]
-    cols_btn = st.columns(3) 
-
-    for i, nombre_hoja in enumerate(hojas_excel):
-        with cols_btn[i % 3]:
-            if st.button(nombre_hoja, key=f"micro_btn_{nombre_hoja}", use_container_width=True):
-                p_vals = cargar_pesos_por_posicion(str(ruta_pesos), nombre_hoja)
-                if p_vals:
-                    for cat, metricas in p_vals.items():
-                        for m, v in metricas.items():
-                            st.session_state[f"slider_{cat}_{m}"] = float(v)
-                    st.rerun()
-
-    st.divider()
-    # Cargamos la estructura inicial para los tabs (usamos Delantero como base estructural)
-    PESOS_BASE = cargar_pesos_por_posicion(str(ruta_pesos), "Delantero")
-    tabs = st.tabs(["⚽ Ataque", "🛡️ Defensa", "🪄 Técnica", "🏃 Físico"])
-    pesos_individuales = {cat: {} for cat in COL_MAP.values()}
-
-    for i, (categoria, metricas) in enumerate(PESOS_BASE.items()):
-        with tabs[i]:
-            c1, c2 = st.columns(2)
-            items = list(metricas.items())
-            mid = (len(items) + 1) // 2
-            for j, (metrica, valor_def) in enumerate(items):
-                key_s = f"slider_{categoria}_{metrica}"
-                val_s = st.session_state.get(key_s, float(valor_def))
-                with (c1 if j < mid else c2):
-                    pesos_individuales[categoria][metrica] = st.slider(metrica, -100.0, 100.0, val_s, 5.0, key=key_s)
+PESOS_BASE = cargar_pesos_por_posicion(str(ruta_pesos), "Delantero")
+pesos_individuales = {cat: {} for cat in COL_MAP.values()}
+for _cat_pi, _metricas_pi in PESOS_BASE.items():
+    for _m_pi, _v_pi in _metricas_pi.items():
+        _key_pi = f"slider_{_cat_pi}_{_m_pi}"
+        pesos_individuales[_cat_pi][_m_pi] = st.session_state.get(_key_pi, float(_v_pi))
 
 
 
@@ -858,6 +788,46 @@ def calcular_ranking_total(df_input, pesos_micro, pesos_macro):
         df["Score Físico"] * pesos_macro["Físico"]
     ).round(1)
     
+    return df
+
+# ==================== SCORING PORTEROS ====================
+METRICAS_PORTERO = {
+    "GK Goles evitados /90":        {"peso": 0.25, "invert": False},
+    "GK Paradas %":                 {"peso": 0.20, "invert": False},
+    "GK Portería imbatida /90":     {"peso": 0.15, "invert": False},
+    "GK Goles recibidos /90":       {"peso": 0.15, "invert": True},
+    "GK xG en contra /90":          {"peso": 0.10, "invert": True},
+    "GK Salidas /90":               {"peso": 0.05, "invert": False},
+    "GK Duelos aéreos /90":         {"peso": 0.05, "invert": False},
+    "GK Pases atrás recibidos /90": {"peso": 0.05, "invert": False},
+}
+
+def calcular_score_portero(df: pd.DataFrame, metricas_dict=None) -> pd.DataFrame:
+    df = df.copy()
+    _base = metricas_dict if metricas_dict is not None else METRICAS_PORTERO
+    metricas_activas = {m: cfg for m, cfg in _base.items() if m in df.columns}
+    if not metricas_activas:
+        df["Score Portero"] = np.nan
+        return df
+    for m, cfg in metricas_activas.items():
+        col = _to_num(df[m])
+        min_v, max_v = col.min(), col.max()
+        if max_v == min_v:
+            df[f"n_{m}"] = 50.0
+        else:
+            norm = (col - min_v) / (max_v - min_v) * 100
+            df[f"n_{m}"] = (100 - norm) if cfg["invert"] else norm
+    cols_norm = [f"n_{m}" for m in metricas_activas]
+    pesos_arr = np.array([metricas_activas[m]["peso"] for m in metricas_activas], dtype=float)
+    vals = df[cols_norm].values
+    scores = []
+    for row in vals:
+        mask = ~np.isnan(row)
+        if mask.sum() == 0:
+            scores.append(np.nan)
+        else:
+            scores.append(float(np.dot(row[mask], pesos_arr[mask]) / pesos_arr[mask].sum()))
+    df["Score Portero"] = np.round(scores, 1)
     return df
 
 def letra_score(s):
@@ -1002,7 +972,7 @@ col_posicion= next((c for c in ["Posición específica", "position"]    if c in 
 col_minutos = "Minutos jugados" if "Minutos jugados" in df_scored.columns else None
 col_partidos = "Partidos jugados" if "Partidos jugados" in df_scored.columns else None
 
-tab1, tab2, tab3 = st.tabs(["📊 Rankings de Rendimiento", "🔍 Visualizador por Métrica", "📋 Tabla Multi-Métrica"])
+tab1, tab2, tab3, tab4 = st.tabs(["📊 Rankings de Rendimiento", "🔍 Visualizador por Métrica", "📋 Tabla Multi-Métrica", "🧤 Porteros"])
 
 with tab1:
     # ==================== TABLA GENERAL ====================
@@ -1015,6 +985,89 @@ with tab1:
             </p>
         </div>
     """, unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Expanders de pesos (solo visibles en este tab) ──────────────────────
+    with st.expander("⚖️ NIVEL 1: Importancia de los Bloques"):
+        # --- SECCIÓN DE FAVORITOS ---
+        st.markdown("<p style='font-weight: bold; color: #1e3a8a;'>⭐ Mis Configuraciones Guardadas</p>", unsafe_allow_html=True)
+        f_col1, f_col2, f_col3, f_col4 = st.columns([2, 0.8, 0.8, 2])
+        with f_col1:
+            mis_favs = cargar_favoritos()
+            nombre_sel = st.selectbox("Cargar favorito:", ["Seleccionar..."] + list(mis_favs.keys()), label_visibility="collapsed")
+        with f_col2:
+            if st.button("📥 Cargar", use_container_width=True, disabled=nombre_sel=="Seleccionar..."):
+                aplicar_favorito(nombre_sel)
+                st.rerun()
+        with f_col3:
+            if st.button("🗑️ Eliminar", use_container_width=True, disabled=nombre_sel=="Seleccionar..."):
+                if eliminar_favorito(nombre_sel):
+                    st.toast(f"'{nombre_sel}' eliminado")
+                    st.rerun()
+        with f_col4:
+            col_txt, col_btn_save = st.columns([1.2, 1])
+            with col_txt:
+                nuevo_fav = st.text_input("Nombre nuevo", placeholder="Nombre...", label_visibility="collapsed", key="input_nuevo_fav")
+            with col_btn_save:
+                if st.button("💾 Guardar", use_container_width=True):
+                    if nuevo_fav:
+                        w_glob = {"Ofensivo": st.session_state.get("w_of_val", 0.25), "Defensivo": st.session_state.get("w_def_val", 0.25), "Técnico": st.session_state.get("w_tec_val", 0.25), "Físico": st.session_state.get("w_fis_val", 0.25)}
+                        w_mic = {k: v for k, v in st.session_state.items() if k.startswith("slider_")}
+                        guardar_favorito(nuevo_fav, w_glob, w_mic)
+                        st.toast(f"¡{nuevo_fav} guardado!")
+                        st.rerun()
+                    else:
+                        st.warning("Escribe un nombre")
+        st.divider()
+        st.markdown("<p style='font-weight: bold;'>🎯 Perfiles predefinidos por posición (Excel):</p>", unsafe_allow_html=True)
+        posiciones_macro = ["Portero", "Defensa central", "Lateral", "Mediocampista defensivo", "Mediocampista ofensivo", "Extremo", "Delantero centro"]
+        cols_macro = st.columns(4)
+        for i, pos_name in enumerate(posiciones_macro):
+            with cols_macro[i % 4]:
+                if st.button(pos_name, key=f"macro_btn_{pos_name}", use_container_width=True):
+                    m_vals = cargar_pesos_macro_tabla(str(ruta_pesos_macro), pos_name)
+                    if m_vals:
+                        st.session_state["w_of_val"] = m_vals["Ofensivo"]
+                        st.session_state["w_def_val"] = m_vals["Defensivo"]
+                        st.session_state["w_tec_val"] = m_vals["Técnico"]
+                        st.session_state["w_fis_val"] = m_vals["Físico"]
+                        st.rerun()
+        st.divider()
+        c_g1, c_g2, c_g3, c_g4 = st.columns(4)
+        with c_g1: w_of  = st.slider("⚽ Ofensivo",  0.0, 1.0, key="w_of_val",  step=0.05)
+        with c_g2: w_def = st.slider("🛡️ Defensivo", 0.0, 1.0, key="w_def_val", step=0.05)
+        with c_g3: w_tec = st.slider("🪄 Técnico",   0.0, 1.0, key="w_tec_val", step=0.05)
+        with c_g4: w_fis = st.slider("🏃 Físico",    0.0, 1.0, key="w_fis_val", step=0.05)
+        sum_w = (w_of + w_def + w_tec + w_fis) or 1
+        pesos_globales = {"Ofensivo": w_of/sum_w, "Defensivo": w_def/sum_w, "Técnico": w_tec/sum_w, "Físico": w_fis/sum_w}
+
+    with st.expander("🛠️ NIVEL 2: Ajuste del peso individual de cada estadística"):
+        st.markdown("<p style='font-weight: bold;'>📊 Cargar pesos por posición (Pestañas Excel):</p>", unsafe_allow_html=True)
+        hojas_excel = ["Defensa central", "Lateral", "Mediocampista defensivo", "Mediocampista ofensivo", "Extremo", "Delantero"]
+        cols_btn = st.columns(3)
+        for i, nombre_hoja in enumerate(hojas_excel):
+            with cols_btn[i % 3]:
+                if st.button(nombre_hoja, key=f"micro_btn_{nombre_hoja}", use_container_width=True):
+                    p_vals = cargar_pesos_por_posicion(str(ruta_pesos), nombre_hoja)
+                    if p_vals:
+                        for cat, metricas in p_vals.items():
+                            for m, v in metricas.items():
+                                st.session_state[f"slider_{cat}_{m}"] = float(v)
+                        st.rerun()
+        st.divider()
+        _PESOS_BASE_N2 = cargar_pesos_por_posicion(str(ruta_pesos), "Delantero")
+        tabs_n2 = st.tabs(["⚽ Ataque", "🛡️ Defensa", "🪄 Técnica", "🏃 Físico"])
+        for i, (categoria, metricas) in enumerate(_PESOS_BASE_N2.items()):
+            with tabs_n2[i]:
+                c1, c2 = st.columns(2)
+                items = list(metricas.items())
+                mid = (len(items) + 1) // 2
+                for j, (metrica, valor_def) in enumerate(items):
+                    key_s = f"slider_{categoria}_{metrica}"
+                    val_s = st.session_state.get(key_s, float(valor_def))
+                    with (c1 if j < mid else c2):
+                        pesos_individuales[categoria][metrica] = st.slider(metrica, -100.0, 100.0, val_s, 5.0, key=key_s)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -1599,6 +1652,224 @@ with tab3:
         st.divider()
 
     render_tab3()
+
+with tab4:
+    st.markdown("<h2 class='section-header'>🧤 Rankings de Porteros</h2>", unsafe_allow_html=True)
+    st.markdown("""
+        <div class='info-box' style='background: linear-gradient(135deg, rgba(16,185,129,0.05) 0%, rgba(5,150,105,0.08) 100%);
+             border-left: 4px solid #10b981;'>
+            <p style='margin: 0; font-size: 0.85rem; line-height: 1.6; color: #475569;'>
+                Ranking específico para porteros calculado con métricas propias del puesto.
+                Los percentiles se calculan <b>dentro de cada liga</b> comparando solo porteros entre sí.
+            </p>
+        </div>
+    """, unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    @st.fragment
+    def render_tab_porteros():
+        # ── Pesos de portero ─────────────────────────────────────────────────
+        # Usamos un contador de reset ("gk_reset_count") como sufijo de la key
+        # del slider. Al incrementarlo, Streamlit trata el slider como un widget
+        # nuevo y lo inicializa con value= desde cero, moviendo la barra.
+        if "gk_reset_count" not in st.session_state:
+            st.session_state["gk_reset_count"] = 0
+
+        if st.button("🔄 Restaurar pesos por defecto", key="gk_reset_pesos"):
+            st.session_state["gk_reset_count"] += 1
+
+        _gk_gen = st.session_state["gk_reset_count"]  # generación actual
+
+        with st.expander("⚖️ Pesos del Score Portero"):
+            st.markdown("<p style='font-weight: bold; color: #065f46;'>Ajusta la importancia de cada métrica (los pesos se normalizan automáticamente):</p>", unsafe_allow_html=True)
+            _gk_cols = st.columns(2)
+            _gk_metricas_lista = list(METRICAS_PORTERO.items())
+            _gk_mid = (len(_gk_metricas_lista) + 1) // 2
+            _gk_pesos_leidos = {}
+            for _gi, (_gk_m, _gk_cfg) in enumerate(_gk_metricas_lista):
+                _gk_label = _gk_m.replace("GK ", "") + (" ↓" if _gk_cfg["invert"] else " ↑")
+                # La key incluye _gk_gen: cada reset crea un widget nuevo con value= por defecto
+                _gk_slider_key = f"gk_slider_{_gk_gen}_{_gk_m}"
+                with _gk_cols[0 if _gi < _gk_mid else 1]:
+                    _gk_pesos_leidos[_gk_m] = st.slider(
+                        _gk_label, 0.0, 1.0,
+                        value=float(_gk_cfg["peso"]),
+                        step=0.05,
+                        key=_gk_slider_key
+                    )
+            _gk_suma = sum(_gk_pesos_leidos.values()) or 1
+            st.caption(f"Suma de pesos: {_gk_suma:.2f} → normalizados a 1.00")
+
+        _gk_suma_final = sum(_gk_pesos_leidos.values()) or 1
+        METRICAS_PORTERO_ACTIVAS = {
+            m: {"peso": _gk_pesos_leidos[m] / _gk_suma_final, "invert": cfg["invert"]}
+            for m, cfg in METRICAS_PORTERO.items()
+        }
+
+        _GK_CODE = "GK"
+        _KEY_TODAS = "🌍 Todas las ligas"
+        df_porteros_por_liga = {}
+
+        for _liga_key, _df_liga_raw in archivos_cargados.items():
+            _competicion = _competicion_de_nombre(_liga_key)
+            _df = _df_liga_raw.copy()
+            for _col in _df.columns:
+                if _df[_col].dtype == object:
+                    _conv = _df[_col].astype(str).str.replace(",", ".", regex=False)
+                    _num  = pd.to_numeric(_conv, errors="coerce")
+                    if _num.notna().sum() > _df[_col].notna().sum() * 0.5:
+                        _df[_col] = _num
+            if "Posición específica" not in _df.columns:
+                continue
+            _df = _df[_df["Posición específica"].apply(
+                lambda cell: _GK_CODE in [x.strip() for x in str(cell).split(",")] if pd.notna(cell) else False
+            )]
+            if _df.empty:
+                continue
+            # Filtro de minutos adaptativo (mínimo 10 porteros)
+            _TOP_N_GK = 10
+            if "Minutos jugados" in _df.columns:
+                _umbral = rango_minutos[0]
+                while True:
+                    _cand = _df[_df["Minutos jugados"] >= _umbral]
+                    if len(_cand) >= _TOP_N_GK or _umbral == 0:
+                        _df = _cand
+                        break
+                    _umbral = max(0, _umbral - 50)
+            _df = add_per90_cols(_df)
+            _df = calcular_score_portero(_df, METRICAS_PORTERO_ACTIVAS)
+            _vals = _df["Score Portero"].dropna()
+            if not _vals.empty:
+                _df["Z-score Portero"] = zscore(_df["Score Portero"], nan_policy="omit").round(2)
+                _df["Percentil Portero"] = [
+                    round(percentileofscore(_vals, v, kind="rank"), 1) if pd.notna(v) else np.nan
+                    for v in _df["Score Portero"]
+                ]
+            else:
+                _df["Z-score Portero"] = np.nan
+                _df["Percentil Portero"] = np.nan
+            df_porteros_por_liga[_competicion] = _df
+
+        if not df_porteros_por_liga:
+            st.warning("No se encontraron porteros en los datos cargados.")
+            return
+
+        # Ranking global de porteros (todas las ligas juntas)
+        if len(df_porteros_por_liga) > 1:
+            _dfs_union = []
+            for _l, _d in df_porteros_por_liga.items():
+                _tmp = _d.copy()
+                _tmp["_liga"] = _l
+                _dfs_union.append(_tmp)
+            _df_todas = pd.concat(_dfs_union, ignore_index=True)
+            _df_todas = calcular_score_portero(_df_todas, METRICAS_PORTERO_ACTIVAS)
+            _vals = _df_todas["Score Portero"].dropna()
+            if not _vals.empty:
+                _df_todas["Z-score Portero"] = zscore(_df_todas["Score Portero"], nan_policy="omit").round(2)
+                _df_todas["Percentil Portero"] = [
+                    round(percentileofscore(_vals, v, kind="rank"), 1) if pd.notna(v) else np.nan
+                    for v in _df_todas["Score Portero"]
+                ]
+            df_porteros_por_liga = {_KEY_TODAS: _df_todas, **df_porteros_por_liga}
+
+        _col_nombre_gk  = next((c for c in ["Jugador", "player_name"] if c in next(iter(df_porteros_por_liga.values())).columns), None)
+        _col_equipo_gk  = "Equipo durante el período seleccionado"
+        _col_minutos_gk = "Minutos jugados"
+        _metricas_tabla = [m for m in METRICAS_PORTERO_ACTIVAS if any(m in df.columns for df in df_porteros_por_liga.values())]
+
+        def _render_tabla_gk(df_gk, liga_key):
+            cols_base  = [c for c in [_col_nombre_gk, _col_equipo_gk, "Edad", _col_minutos_gk] if c and c in df_gk.columns]
+            cols_score = [c for c in ["Score Portero", "Percentil Portero", "Z-score Portero"] if c in df_gk.columns]
+            cols_met   = [m for m in _metricas_tabla if m in df_gk.columns]
+            df_show = df_gk[cols_base + cols_score + cols_met].copy()
+            df_show = df_show.sort_values("Score Portero", ascending=False).head(top_n_tabla).reset_index(drop=True)
+            rename_gk = {}
+            if _col_nombre_gk:                       rename_gk[_col_nombre_gk]  = "Portero"
+            if _col_equipo_gk in df_show.columns:    rename_gk[_col_equipo_gk]  = "Equipo"
+            if _col_minutos_gk in df_show.columns:   rename_gk[_col_minutos_gk] = "Min"
+            df_show = df_show.rename(columns=rename_gk)
+            busq = st.text_input("🔍 Buscar portero", placeholder="Nombre...", key=f"buscar_gk_{liga_key}")
+            if busq and "Portero" in df_show.columns:
+                mask = df_show["Portero"].str.contains(busq, case=False, na=False)
+                df_show = pd.concat([df_show[mask], df_show[~mask]]).reset_index(drop=True)
+            fmt = {}
+            for c in ["Score Portero", "Percentil Portero"]:
+                if c in df_show.columns: fmt[c] = "{:.1f}"
+            if "Z-score Portero" in df_show.columns: fmt["Z-score Portero"] = "{:.2f}"
+            if "Min"  in df_show.columns: fmt["Min"]  = "{:.0f}"
+            if "Edad" in df_show.columns: fmt["Edad"] = "{:.0f}"
+            for m in cols_met:
+                _lbl = rename_gk.get(m, m)
+                if _lbl in df_show.columns: fmt[_lbl] = "{:.2f}"
+            gradient_cols = ["Score Portero"] if "Score Portero" in df_show.columns else []
+            st.dataframe(
+                df_show.style.format(fmt, na_rep="-").background_gradient(subset=gradient_cols, cmap="RdYlGn"),
+                use_container_width=True,
+                height=420,
+            )
+
+        ligas_gk = list(df_porteros_por_liga.keys())
+        if len(ligas_gk) == 1:
+            _render_tabla_gk(df_porteros_por_liga[ligas_gk[0]], ligas_gk[0])
+        else:
+            tab_labels_gk = [liga if liga == _KEY_TODAS else f"🏟️ {liga}" for liga in ligas_gk]
+            sub_tabs_gk = st.tabs(tab_labels_gk)
+            for _sub, _liga in zip(sub_tabs_gk, ligas_gk):
+                with _sub:
+                    _render_tabla_gk(df_porteros_por_liga[_liga], _liga)
+
+        # ── Botón de descarga ────────────────────────────────────────────────
+        st.divider()
+
+        def _preparar_hoja_gk(df_gk, liga_key):
+            cols_base  = [c for c in [_col_nombre_gk, _col_equipo_gk, "Edad", _col_minutos_gk] if c and c in df_gk.columns]
+            cols_score = [c for c in ["Score Portero", "Percentil Portero", "Z-score Portero"] if c in df_gk.columns]
+            cols_met   = [m for m in _metricas_tabla if m in df_gk.columns]
+            df_show = df_gk[cols_base + cols_score + cols_met].copy()
+            df_show = df_show.sort_values("Score Portero", ascending=False).head(top_n_tabla).reset_index(drop=True)
+            rename_gk = {}
+            if _col_nombre_gk:                       rename_gk[_col_nombre_gk]  = "Portero"
+            if _col_equipo_gk in df_show.columns:    rename_gk[_col_equipo_gk]  = "Equipo"
+            if _col_minutos_gk in df_show.columns:   rename_gk[_col_minutos_gk] = "Min"
+            return df_show.rename(columns=rename_gk)
+
+        def _generar_zip_porteros() -> bytes:
+            import zipfile
+            from openpyxl import Workbook
+            zip_buf = io.BytesIO()
+            with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                for _liga, _df_gk in df_porteros_por_liga.items():
+                    wb = Workbook()
+                    wb.remove(wb.active)
+                    _df_hoja = _preparar_hoja_gk(_df_gk, _liga)
+                    _escribir_hoja_excel(wb, _df_hoja, "🧤 Porteros")
+                    excel_buf = io.BytesIO()
+                    wb.save(excel_buf)
+                    _nombre_archivo = (
+                        f"porteros_todas_las_ligas_{pd.Timestamp.now().strftime('%Y%m%d')}.xlsx"
+                        if _liga == _KEY_TODAS
+                        else f"porteros_{_liga}_{pd.Timestamp.now().strftime('%Y%m%d')}.xlsx"
+                    )
+                    zf.writestr(_nombre_archivo, excel_buf.getvalue())
+            return zip_buf.getvalue()
+
+        _n_ligas_gk = len(df_porteros_por_liga)
+        _label_gk = (
+            f"📥 Descargar rankings porteros — {_n_ligas_gk} Excel independientes (1 por liga)"
+            if _n_ligas_gk > 1 else
+            "📥 Descargar ranking porteros"
+        )
+        st.download_button(
+            label=_label_gk,
+            data=_generar_zip_porteros(),
+            file_name=f"porteros_{pd.Timestamp.now().strftime('%Y%m%d')}.zip",
+            mime="application/zip",
+            key="dl_porteros_zip",
+            type="primary",
+            use_container_width=True,
+        )
+
+    render_tab_porteros()
 
 # ==================== FOOTER ====================
 st.markdown(f"""

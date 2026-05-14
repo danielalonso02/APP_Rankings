@@ -78,7 +78,7 @@ warnings.simplefilter(action="ignore", category=pd.errors.PerformanceWarning)
 BASE_DIR = os.path.dirname(os.path.dirname(__file__)) 
 current_l="Liga F"
 current_season="2025/26"
-def create_report(player_id_analizing,wyscout_file,parameters_file,position_number,min_minutes,color_selection="#FFFFFF",summary=0,current_league=current_l,season="2024/25",pesos_favorito=None):
+def create_report(player_id_analizing,wyscout_file,parameters_file,position_number,min_minutes,color_selection="#FFFFFF",summary=0,current_league=current_l,season="2024/25",pesos_favorito=None,logo_file=None):
     
     
     print("BASE DIR:",BASE_DIR)
@@ -456,32 +456,51 @@ def create_report(player_id_analizing,wyscout_file,parameters_file,position_numb
         canvas.setFillColor(HexColor(color_selection_og))  # grey-blue background
         canvas.rect(0, 0, A4[0], A4[1], fill=1, stroke=0)  # Full-page rectangle
         # Logo paths (update with your actual paths)
-        logo_left_path = "Logos/URJC_Logo.png"
+        logo_left_path = logo_file if (logo_file and os.path.exists(logo_file)) else "Logos/URJC_Logo.png"
         logo_right_path = "Logos/Redes_Logo.png"
 
         # Logo size (adjust as needed)
-        logo_width = 0.89 * inch
         logo_width2 = 0.75 * inch
         logo_height = 0.89 * inch
+
+        # Dimensiones del logo izquierdo:
+        # - Si el usuario ha subido un logo personalizado, se respeta su aspect ratio
+        #   fijando la altura a 0.89 inch y limitando el ancho a 1.20 inch como tope.
+        # - Si se usa el logo URJC por defecto, se mantienen las dimensiones fijas originales.
+        if logo_file and os.path.exists(logo_file):
+            logo_max_h = 0.89 * inch
+            logo_max_w = 1.20 * inch
+            _pil_img = PILImage.open(logo_left_path)
+            _img_w, _img_h = _pil_img.size
+            _pil_img.close()
+            logo_left_h = logo_max_h
+            logo_width  = logo_max_h * (_img_w / _img_h)
+            if logo_width > logo_max_w:
+                logo_width  = logo_max_w
+                logo_left_h = logo_max_w * (_img_h / _img_w)
+        else:
+            logo_width  = 0.89 * inch
+            logo_left_h = 0.89 * inch
 
         # Draw left logo (top-left corner)
         canvas.drawImage(
             logo_left_path,
             x=0.2 * inch,
-            y=A4[1] - logo_height - 0.2 * inch,
+            y=A4[1] - logo_left_h - 0.2 * inch,
             width=logo_width,
-            height=logo_height,
+            height=logo_left_h,
             mask='auto'
         )
 
         # Draw right logo (top-right corner)
+        # Dimensiones hardcodeadas, completamente independientes del logo izquierdo
         canvas.drawImage(
             logo_right_path,
-            x=A4[0] - logo_width - 0.2 * inch,
-            y=A4[1] - logo_height - 0.2 * inch,
-            width=logo_width,
-           height=logo_height,
-           mask='auto'
+            x=A4[0] - (0.89 * inch) - 0.2 * inch,
+            y=A4[1] - (0.89 * inch) - 0.2 * inch,
+            width=0.89 * inch,
+            height=0.89 * inch,
+            mask='auto'
         )
         page_num = canvas.getPageNumber()
         text = f"Página {page_num}"
@@ -1334,6 +1353,7 @@ if __name__ == "__main__":
     parser.add_argument("--current_league", type=str, default="Liga F")
     parser.add_argument("--season", type=str, default="2024/25")
     parser.add_argument("--pesos_file", type=str, default=None)
+    parser.add_argument("--logo_file", type=str, default=None)
 
     args = parser.parse_args()
     pesos_favorito = None
@@ -1352,4 +1372,5 @@ if __name__ == "__main__":
         current_league=args.current_league,
         season=args.season,
         pesos_favorito=pesos_favorito,
+        logo_file=args.logo_file,
     )

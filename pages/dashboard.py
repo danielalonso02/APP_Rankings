@@ -51,6 +51,10 @@ if "df_dashboard" not in st.session_state:
     st.session_state["df_dashboard_nombre"] = None
     st.session_state["df_dashboard_bytes"] = None  # guardamos bytes para pasarlos al script
 
+# ── Estado del logo personalizado ──
+if "logo_file_path" not in st.session_state:
+    st.session_state["logo_file_path"] = None
+
 if st.session_state["df_dashboard"] is not None:
     col_info, col_cambiar = st.columns([3, 1])
     with col_info:
@@ -114,6 +118,31 @@ def filtros_fragment():
     with col3:
         summary = util.select_summary()
 
+    # ── Logo personalizado ──
+    st.markdown(":material/image: Logo del informe")
+    col_logo, col_logo_preview = st.columns([3, 1])
+    with col_logo:
+        uploaded_logo = st.file_uploader(
+            "📷 OPCIONAL — Subir logo personalizado — PNG o JPG",
+            type=["png", "jpg", "jpeg"],
+            key="uploader_logo"
+        )
+        if uploaded_logo is not None:
+            import tempfile as _tmp_logo
+            ext = uploaded_logo.name.rsplit(".", 1)[-1]
+            tmp_logo = _tmp_logo.NamedTemporaryFile(suffix=f".{ext}", delete=False)
+            tmp_logo.write(uploaded_logo.read())
+            tmp_logo.close()
+            st.session_state["logo_file_path"] = tmp_logo.name
+        elif st.session_state.get("logo_file_path"):
+            st.caption(f"✅ Logo cargado: `{os.path.basename(st.session_state['logo_file_path'])}`")
+        
+    with col_logo_preview:
+        if uploaded_logo is not None:
+            st.image(uploaded_logo, width=80, caption="Vista previa")
+        elif st.session_state.get("logo_file_path") and os.path.exists(st.session_state["logo_file_path"]):
+            st.image(st.session_state["logo_file_path"], width=80, caption="Logo actual")
+
     # ── Selector de configuración de pesos ──
     st.markdown(":material/tune: Configuración de pesos")
     pesos_favorito_sel = None
@@ -154,6 +183,7 @@ def filtros_fragment():
         "pesos_favorito_sel": pesos_favorito_sel,
         "pesos_fisicos_sel": pesos_fisicos_sel,
         "wyscout_file_temp": ruta_archivo_temp,
+        "logo_file_path": st.session_state.get("logo_file_path"),
     }
 
     # ── FIX: guardar siempre los filtros actuales en session_state ──
@@ -202,6 +232,11 @@ if ejecutar:
                 "--color_selection", filtros_ejecucion.get("color_selection", "#FFFFFF"),
                 "--summary",        str(filtros_ejecucion.get("summary", 0)),
             ]
+            # Añadir logo personalizado si se ha subido
+            _logo_path = filtros_ejecucion.get("logo_file_path")
+            if _logo_path and os.path.exists(_logo_path):
+                cmd += ["--logo_file", _logo_path]
+
             # Añadir pesos tácticos si hay favorito seleccionado
             import json as _json, tempfile as _tempfile
             _pesos_sel = filtros_ejecucion.get("pesos_favorito_sel")

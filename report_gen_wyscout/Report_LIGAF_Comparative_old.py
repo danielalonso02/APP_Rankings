@@ -57,8 +57,6 @@ import io
 from Graficas_2D_comparative import graficas_2D
 from reportlab.platypus import KeepInFrame
 from Notas_tacticas import notas_tacticas
-from Notas_Skillcorner import notas_fisicas
-from PizzaPhysical_comparative import pizzaplot_phys
 from colorsys import rgb_to_hls
 from reportlab.platypus.tableofcontents import TableOfContents
 from reportlab.platypus import NextPageTemplate
@@ -75,7 +73,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 
 current_l="La Liga"
 current_season="2024/25"
-def create_report(player_id1,player_id2,wyscout_file1,parameters_file,position_number,min_minutes,color_selection="#FFFFFF",summary=0,league1=current_l,league2=current_l,season1="2024/25",season2="2024/25",wyscout_file2=None,pesos_favorito=None,pesos_fisicos=None):
+def create_report(player_id1,player_id2,wyscout_file1,parameters_file,position_number,min_minutes,color_selection="#FFFFFF",summary=0,league1=current_l,league2=current_l,season1="2024/25",season2="2024/25",wyscout_file2=None,pesos_favorito=None,logo_file=None):
     
     
     
@@ -356,8 +354,6 @@ def create_report(player_id1,player_id2,wyscout_file1,parameters_file,position_n
     player_allpositions2 = stats_player2["Posición específica"]
     player_birth_country2 = stats_player2["País de nacimiento"]
     
-    folder_skillcorner = Path(BASE_DIR) / "report_gen_opta" / "SKILLCORNER"
-    
     # team_id=186
     # _next_path=f"{team_id}/logo/l_t{team_id}.png"
     # complete_teampath=filepath_carpeta+"/"+_next_path
@@ -383,52 +379,6 @@ def create_report(player_id1,player_id2,wyscout_file1,parameters_file,position_n
     # print(of_score)
     # print(def_score)
     
-    try:
-        player1_score, player1_letter, number_of_players_position_fis1, playerranking1 = notas_fisicas(
-            PLAYER_POSITION,
-            wyscout_file1,
-            player_name1,
-            parameters_file,
-            min_minutes,
-            folder_skillcorner,
-            player_id1,
-            pesos_fisicos=pesos_fisicos
-        )
-    except Exception as e:
-        print(f"No hay notas físicas para {player_name1}: {e}")
-        player1_score, player1_letter, number_of_players_position_fis1, playerranking1 = 0, "-", 0, 0
-
-    try:
-        player_score2, player_letter2, number_of_players_position_fis2, playerranking2 = notas_fisicas(
-            PLAYER_POSITION,
-            wyscout_file2,
-            player_name2,
-            parameters_file,
-            min_minutes,
-            folder_skillcorner,
-            player_id2,
-            pesos_fisicos=pesos_fisicos
-        )
-    except Exception as e:
-        print(f"No hay notas físicas para {player_name2}: {e}")
-        player_score2, player_letter2, number_of_players_position_fis2, playerranking2 = 0, "-", 0, 0
-
-    try:
-        phys_result = pizzaplot_phys(
-            player_name1, player_name2, PLAYER_POSITION, folder_skillcorner, league=current_league, color="#FFFFFF"
-        )
-        if phys_result is None or phys_result[0] is None:
-            raise ValueError("pizzaplot_phys devolvió None")
-        fig4, output_phys, player1_params, player2_params, parameters1_show, phys_average1, real_j1, real_j2 = phys_result
-        has_physical_data = True
-        print("Datos físicos cargados correctamente.")
-    except Exception as e:
-        print(f"No hay datos físicos para generar las secciones físicas: {e}")
-        has_physical_data = False
-        output_phys = None
-        player1_params, player2_params, parameters1_show, phys_average1, real_j1, real_j2 = [], [], [], [], [], []
-    finally:
-        plt.close("all")  # liberar memoria de figuras matplotlib
     
     
     of_score1=round(of_score1,2)
@@ -439,9 +389,6 @@ def create_report(player_id1,player_id2,wyscout_file1,parameters_file,position_n
     PIZZAPLOT_OF1=output_path1
     PIZZAPLOT_OF2=output_path2
     PIZZAPLOT_DEF=output_path3
-    PIZZAPLOT_PHYS=output_phys if has_physical_data else None
-    
-
     #######################
     #Imagenes
 
@@ -467,7 +414,7 @@ def create_report(player_id1,player_id2,wyscout_file1,parameters_file,position_n
     # PLAYER_CONTRACT2 = player_contract2
     
     
-    paths_graficas_2D=graficas_2D(wyscout_file1,wyscout_file2,player_id1,player_id2,PLAYER_POSITION,min_minutes,folder_skillcorner,color_selection_og)
+    paths_graficas_2D=graficas_2D(wyscout_file1,wyscout_file2,player_id1,player_id2,PLAYER_POSITION,min_minutes,color_selection_og)
 
     ##################################
     
@@ -670,32 +617,47 @@ def create_report(player_id1,player_id2,wyscout_file1,parameters_file,position_n
         canvas.setFillColor(HexColor(color_selection_og))  # grey-blue background
         canvas.rect(0, 0, A4[0], A4[1], fill=1, stroke=0)  # Full-page rectangle
         # Logo paths (update with your actual paths)
-        logo_left_path = "Logos/URJC_Logo.png"
+        logo_left_path = logo_file if (logo_file and os.path.exists(logo_file)) else "Logos/URJC_Logo.png"
         logo_right_path = "Logos/Redes_Logo.png"
 
-        # Logo size (adjust as needed)
-        logo_width = 0.89 * inch
-        logo_width2 = 0.75 * inch
-        logo_height = 0.89 * inch
+        # Dimensiones del logo izquierdo:
+        # - Logo personalizado: se respeta el aspect ratio fijando altura a 0.89 inch.
+        # - Logo URJC por defecto: dimensiones fijas originales.
+        if logo_file and os.path.exists(logo_file):
+            logo_max_h = 0.89 * inch
+            logo_max_w = 1.20 * inch
+            _pil_img = PILImage.open(logo_left_path)
+            _img_w, _img_h = _pil_img.size
+            _pil_img.close()
+            logo_left_h = logo_max_h
+            logo_width  = logo_max_h * (_img_w / _img_h)
+            if logo_width > logo_max_w:
+                logo_width  = logo_max_w
+                logo_left_h = logo_max_w * (_img_h / _img_w)
+        else:
+            logo_width  = 0.89 * inch
+            logo_left_h = 0.89 * inch
 
         # Draw left logo (top-left corner)
         canvas.drawImage(
             logo_left_path,
             x=0.2 * inch,
-            y=A4[1] - logo_height - 0.2 * inch,
+            y=A4[1] - logo_left_h - 0.2 * inch,
             width=logo_width,
-            height=logo_height,
+            height=logo_left_h,
             mask='auto'
         )
 
-        # Draw right logo (top-right corner)
+        # Draw right logo (top-right corner) — dimensiones siempre fijas, independientes del logo izquierdo
+        _right_w = 0.75 * inch
+        _right_h = 0.89 * inch
         canvas.drawImage(
             logo_right_path,
-            x=A4[0] - logo_width - 0.2 * inch,
-            y=A4[1] - logo_height - 0.2 * inch,
-            width=logo_width,
-           height=logo_height,
-           mask='auto'
+            x=A4[0] - _right_w - 0.2 * inch,
+            y=A4[1] - _right_h - 0.2 * inch,
+            width=_right_w,
+            height=_right_h,
+            mask='auto'
         )
         page_num = canvas.getPageNumber()
         text = f"Página {page_num}"
@@ -871,7 +833,6 @@ def create_report(player_id1,player_id2,wyscout_file1,parameters_file,position_n
     d31=full_letter1
     d32=of_letter1
     d33=def_letter1
-    d34=player1_letter if has_physical_data else "N/D"
 
     if d31=="A":
         full_colord31="#007000"
@@ -900,15 +861,6 @@ def create_report(player_id1,player_id2,wyscout_file1,parameters_file,position_n
     else:
         full_colord33="#D2222D"
     
-    if d34=="A":
-        full_colord34="#007000"
-    elif d34=="B":
-        full_colord34="#45B05B" #verde mas clarito
-    elif d34=="C":
-        full_colord34="#FFBF00"
-    else:
-        full_colord34="#D2222D"
-
     estilo_notes = ParagraphStyle(
         'BodyText',
         parent=estiloHoja['BodyText'],
@@ -920,18 +872,15 @@ def create_report(player_id1,player_id2,wyscout_file1,parameters_file,position_n
     Paragraph_d1=Paragraph(f'<font color="{full_colord31}">{d31} </font>',estilo_notes)
     Paragraph_d2=Paragraph(f'<font color="{full_colord32}">{d32} </font>',estilo_notes)
     Paragraph_d3=Paragraph(f'<font color="{full_colord33}">{d33} </font>',estilo_notes)
-    Paragraph_d4=Paragraph(f'<font color="{full_colord34}">{d34} </font>',estilo_notes)
     
     
     d41=Rank_full1
     d42= Rank_of1
     d43=Rank_def1
-    d44=playerranking1 if has_physical_data else "N/D"
     
     d312=full_letter2
     d322=of_letter2
     d332=def_letter2
-    d342=player_letter2 if has_physical_data else "N/D"
 
     if d312=="A":
         full_colord312="#007000"
@@ -960,15 +909,6 @@ def create_report(player_id1,player_id2,wyscout_file1,parameters_file,position_n
     else:
         full_colord332="#D2222D"
     
-    if d342=="A":
-        full_colord342="#007000"
-    elif d342=="B":
-        full_colord342="#45B05B" #verde mas clarito
-    elif d342=="C":
-        full_colord342="#FFBF00"
-    else:
-        full_colord342="#D2222D"
-
     estilo_notes = ParagraphStyle(
         'BodyText',
         parent=estiloHoja['BodyText'],
@@ -980,7 +920,6 @@ def create_report(player_id1,player_id2,wyscout_file1,parameters_file,position_n
     Paragraph_d12=Paragraph(f'<font color="{full_colord312}">{d312} </font>',estilo_notes)
     Paragraph_d22=Paragraph(f'<font color="{full_colord322}">{d322} </font>',estilo_notes)
     Paragraph_d32=Paragraph(f'<font color="{full_colord332}">{d332} </font>',estilo_notes)
-    Paragraph_d42=Paragraph(f'<font color="{full_colord342}">{d342} </font>',estilo_notes)
     
     
     
@@ -988,19 +927,16 @@ def create_report(player_id1,player_id2,wyscout_file1,parameters_file,position_n
     
     d422= Rank_of2
     d432=Rank_def2
-    d442=playerranking2 if has_physical_data else "N/D"
 
     parrafo3=Paragraph(f"Valoraciones",sub_heading)
     front_page_story.append(Spacer(0,3))
     front_page_story.append(parrafo3)
     data_t3=[
-        ["Jugadora","Valoración táctica global","Valoración ofensiva","Valoración defensiva", "Valoración física"],
-        [player_name1,Paragraph_d1,Paragraph_d2,Paragraph_d3,Paragraph_d4],
-        [" ",f"{d41}/{number_of_players_position1}",f"{d42}/{number_of_players_position1}",f"{d43}/{number_of_players_position1}",
-         f"{d44}/{number_of_players_position_fis1}" if has_physical_data else "N/D"],
-        [player_name2,Paragraph_d12,Paragraph_d22,Paragraph_d32,Paragraph_d42],
-        [" ",f"{d412}/{number_of_players_position2}",f"{d422}/{number_of_players_position2}",f"{d432}/{number_of_players_position2}",
-         f"{d442}/{number_of_players_position_fis2}" if has_physical_data else "N/D"]
+        ["Jugadora","Valoración táctica global","Valoración ofensiva","Valoración defensiva"],
+        [player_name1,Paragraph_d1,Paragraph_d2,Paragraph_d3],
+        [" ",f"{d41}/{number_of_players_position1}",f"{d42}/{number_of_players_position1}",f"{d43}/{number_of_players_position1}"],
+        [player_name2,Paragraph_d12,Paragraph_d22,Paragraph_d32],
+        [" ",f"{d412}/{number_of_players_position2}",f"{d422}/{number_of_players_position2}",f"{d432}/{number_of_players_position2}"]
         ]
     style = TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),  # Light grey background for the header row
@@ -1013,7 +949,7 @@ def create_report(player_id1,player_id2,wyscout_file1,parameters_file,position_n
         ('BOTTOMPADDING', (0, 0), (-1, -1), 6),             # Padding at the bottom of each cell
     # NO VISIBLE BORDERS
     ])
-    table3 = Table(data_t3, colWidths=[100,120, 120, 120, 120])
+    table3 = Table(data_t3, colWidths=[120, 130, 130, 130])
     table3.setStyle(style)
     front_page_story.append(table3)
     
@@ -1526,23 +1462,6 @@ def create_report(player_id1,player_id2,wyscout_file1,parameters_file,position_n
     
     main_story212=[]
     
-    if has_physical_data:
-        title_212="Métricas Físicas"
-        main_story212.append(Paragraph(title_212,title_style))
-        main_story212.append(Paragraph("Distancia Total (m) vs Nº Actividades Alta Intensidad",title_style_small))
-        Grafica2D12 = Image(paths_graficas_2D[11],width=600, height=600)
-        Grafica2D12.hAlign = "CENTER"
-        main_story212.append(Grafica2D12)
-        main_story212.append(PageBreak())
-        main_story212.append(Paragraph("Distancia en Sprint vs Velocidad Máxima",title_style_small))
-        Grafica2D13 = Image(paths_graficas_2D[12],width=600, height=600)
-        Grafica2D13.hAlign = "CENTER"
-        main_story212.append(Grafica2D13)
-        main_story212.append(PageBreak())
-        main_story212.append(Paragraph("Aceleraciones Altas vs 'Deceleraciones Altas",title_style_small))
-        Grafica2D14 = Image(paths_graficas_2D[13],width=600, height=600)
-        Grafica2D14.hAlign = "CENTER"
-        main_story212.append(Grafica2D14)
     
     main_story22=[]
     title_22="Posiciones Específicas"
@@ -1588,129 +1507,6 @@ def create_report(player_id1,player_id2,wyscout_file1,parameters_file,position_n
     main_story22.append(parrafo11)
     
     
-    # ----------------GRAFICOS FÍSICOS---------------------
-    
-    main_story_phys = []
-    
-    if has_physical_data:
-        # 1. Título de la página
-        heading_phys = Paragraph('Análisis del Perfil Físico', title_style)
-        heading_phys.outlineLevel = 0
-        main_story_phys.append(heading_phys)
-        
-        # 2. Añadir la imagen de la Pizza Física
-        pizza_physical_img = Image(PIZZAPLOT_PHYS, width=525, height=600)
-        pizza_physical_img.hAlign = "CENTER"
-        main_story_phys.append(pizza_physical_img)
-        
-        # 3. Estilo para la aclaración
-        aclaracion_style_phys = ParagraphStyle(
-            'AclaracionFisica',
-            fontName='Helvetica',
-            fontSize=10,
-            leading=12,
-            alignment=0,
-            textColor=HexColor("#333333")
-            )
-        
-        # 4. Texto explicativo
-        aclaracion_phys = (
-            "<b>Nota:</b> Los percentiles mostrados comparan el rendimiento físico de la jugadora "
-            "específicamente con otras jugadoras de su misma posición (en este caso: " + PLAYER_POSITION + "). "
-            "Entre paréntesis se indica el valor real de la métrica y el promedio de la liga."
-            )
-        
-        main_story_phys.append(Spacer(1, 15))
-        main_story_phys.append(Paragraph(aclaracion_phys, aclaracion_style_phys))
-    
-    # 2. Creación de la sección en el PDF
-    main_story7 = []
-    
-    if has_physical_data:
-        main_story7.append(Spacer(0, 20))
-        main_story7.append(Paragraph("Estadísticas Físicas", title_style))
-        main_story7.append(Paragraph(f"{player_name1} - {player_name2}", cabecera))
-        main_story7.append(Spacer(0, 10))
-        
-        bars_phys = []
-
-        for i in range(len(player1_params)):
-            phys_value1 = player1_params[i]
-            phys_value2 = player2_params[i]
-            text = parameters1_show[i].replace('\n', ' ') 
-            bar = create_bar_chart(
-                phys_value1,
-                phys_value2,
-                phys_value1,
-                phys_value2,
-                max_value=100,
-                min_value=0, 
-                width=200, 
-                height=10, 
-                corner_radius=5, 
-                text=text
-                )   
-            bars_phys.append(bar)
-
-        grouped_bars_phys = [bars_phys[i:i+2] for i in range(0, len(bars_phys), 2)]
-        for bar_pair in grouped_bars_phys:
-            t_phys = Table([bar_pair], colWidths=[250, 250])
-            t_phys.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP')]))
-            main_story7.append(t_phys)
-            main_story7.append(Spacer(0, 15))
-
-        avg_phys = sum(player1_params) / len(player1_params)
-        avg_phys2 = sum(player2_params) / len(player2_params)
-        
-        if avg_phys >= 75: 
-            f_let, f_col = "A", "#007000"
-        elif avg_phys >= 50: 
-            f_let, f_col = "B", "#45B05B"
-        elif avg_phys >= 25: 
-            f_let, f_col = "C", "#FFBF00"
-        else: 
-            f_let, f_col = "D", "#D2222D"
-            
-        if avg_phys2 >= 75: 
-            f_let2, f_col2 = "A", "#007000"
-        elif avg_phys2 >= 50: 
-            f_let2, f_col2 = "B", "#45B05B"
-        elif avg_phys2 >= 25: 
-            f_let2, f_col2 = "C", "#FFBF00"
-        else: 
-            f_let2, f_col2 = "D", "#D2222D"
-
-        main_story7.append(Spacer(0, 10))
-        Paragraph_phys_title = f"Valoración Condición Física ({PLAYER_POSITION}):"
-        main_story7.append(Paragraph(Paragraph_phys_title, title_style))
-        main_story7.append(Spacer(0, 5))
-
-        letters = ["A", "B", "C", "D"]
-        formatted_phys1 = ''
-        for letter in letters:
-            if letter == f_let:
-                formatted_phys1 += f'<font color="{f_col}" size="48"><b>{letter}</b></font>&nbsp;  '
-            else:
-                formatted_phys1 += f"{letter} &nbsp; "
-         
-        formatted_phys2 = ''
-        for letter in letters:
-            if letter == f_let2:
-                formatted_phys2 += f'<font color="{f_col2}" size="48"><b>{letter}</b></font>&nbsp;  '
-            else:
-                formatted_phys2 += f"{letter} &nbsp; "
-                
-        formatted_phys = f"{formatted_phys1} &nbsp | &nbsp {formatted_phys2}"
-        
-        main_story7.append(Paragraph(formatted_phys, score_style))
-        
-        main_story7.append(Spacer(0, 15))
-        linea_image_path = "Logos/linea_break.jpg"
-        Linea_phys = Image(linea_image_path, width=500, height=10)
-        Linea_phys.hAlign = "CENTER"
-        main_story7.append(Linea_phys)
-    
-   
     
     # aqui voy a empezar a añadir lo de chat gpt- que sea ofensivo y defensivo y que sean dos hojas distintas?
     #por ahora 1 hojita
@@ -1768,26 +1564,6 @@ def create_report(player_id1,player_id2,wyscout_file1,parameters_file,position_n
     with open("response.txt", "w", encoding="utf-8") as file:
         file.write("")
         
-    if has_physical_data:
-        chat_comment = f"Write a paragraph comparing the physical strengths and weaknesses of Player A and Player B with a SWOT style, both playing as {dict_english[player_pos]}. The parameters we are evaluating are; {parameters1_show}. The values for each player are: {player_name1} {real_j1}, {player_name2}: {real_j2}. The average values for the position are: {phys_average1}.Highlight where each player excels or underperforms compared to each other and to the average, and suggest areas where they could improve. Choose the best player."
-        chat(chat_comment, context, action="translate", language="Spanish",chat_log=None)
-        
-        with open("response.txt","r",encoding="utf-8") as file:
-            text_phys=file.read()
-        paragraphs=text_phys.split("\n\n")
-        def_text = "<br/><br/>".join(paragraphs[2:]) if len(paragraphs) > 1 else ""
-        parrafo_deftxt=Paragraph(def_text,glossary_style2)
-        main_story23.append(PageBreak())
-        main_story23.append(Paragraph("Resumen Físico",title_style))
-        main_story23.append(parrafo_deftxt)
-        
-        with open("response.txt", "w", encoding="utf-8") as file:
-            file.write("")
-            
-    physical_sections = (
-        [PageBreak()] + main_story_phys +
-        [PageBreak()] + main_story7
-        ) if has_physical_data else []
         
     
     if PLAYER_POSITION=="Defensa" or PLAYER_POSITION=="Lateral" or PLAYER_POSITION=="Portera":
@@ -1806,70 +1582,6 @@ def create_report(player_id1,player_id2,wyscout_file1,parameters_file,position_n
             
         entries = [("1. Estadísticas Ofensivas", "3"),
             ("2. Estadísticas Defensivas", "7"),
-            ("3. Estadísticas Físicas", "10"),
-            ("4. Anexos", "11")]
-
-        def fill_dots(title, total_width=98):
-            width=total_width-len(title)-1
-            return title + " " 
-
-        index_story = []
-        index_story.append(Paragraph("Índice", title_style))
-        index_story.append(Spacer(1, 20))
-            
-        table_data = []
-        for title, page in entries:
-                
-            table_data.append([fill_dots(title, 96), page])
-
-        table = Table(table_data, colWidths=[150*mm, 20*mm])
-        table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 0), (-1, -1), 14),
-            ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
-            ]))
-
-            
-        index_story.append(table)
-
-
-        full_Story = ( 
-            front_page_story + [PageBreak()] +
-            index_story + [PageBreak()] +
-            main_story2 + [PageBreak()] +
-            main_story3 + [PageBreak()] +
-            main_story5 + [PageBreak()] +
-            main_story4 +
-            physical_sections + [PageBreak()] +
-            main_story23 + [PageBreak()] +
-            main_story17 + [PageBreak()] +
-            main_story18 + [PageBreak()] +
-            main_story19 + [PageBreak()] +
-            main_story20 + [PageBreak()] +
-            main_story21 + [PageBreak()] +
-            main_story212 + [PageBreak()] +
-            main_story15 + [PageBreak()] +
-            main_story22
-            )
-            
-    else:
-            #### INDICE
-        index_story=[]
-            
-        index_style = ParagraphStyle(
-            'TOC',
-            fontName='Helvetica',
-            fontSize=14,
-            leading=36,
-            alignment=0,
-            spaceAfter=12,
-            textColor=HexColor(letter_colors)
-        )
-            
-        entries = [("1. Estadísticas Ofensivas", "3"),
-            ("2. Estadísticas Defensivas", "7"),
-            ("3. Estadísticas Físicas", "10"),
             ("3. Anexos", "11")]
 
         def fill_dots(title, total_width=98):
@@ -1896,11 +1608,65 @@ def create_report(player_id1,player_id2,wyscout_file1,parameters_file,position_n
             
         index_story.append(table)
 
-        physical_sections = (
-            [PageBreak()] + main_story_phys +
-            [PageBreak()] + main_story7 +
-            [PageBreak()] + main_story212
-        ) if has_physical_data else []
+
+        full_Story = ( 
+            front_page_story + [PageBreak()] +
+            index_story + [PageBreak()] +
+            main_story2 + [PageBreak()] +
+            main_story3 + [PageBreak()] +
+            main_story5 + [PageBreak()] +
+            main_story4 + [PageBreak()] +
+            main_story23 + [PageBreak()] +
+            main_story17 + [PageBreak()] +
+            main_story18 + [PageBreak()] +
+            main_story19 + [PageBreak()] +
+            main_story20 + [PageBreak()] +
+            main_story21 + [PageBreak()] +
+            main_story15 + [PageBreak()] +
+            main_story22
+            )
+            
+    else:
+            #### INDICE
+        index_story=[]
+            
+        index_style = ParagraphStyle(
+            'TOC',
+            fontName='Helvetica',
+            fontSize=14,
+            leading=36,
+            alignment=0,
+            spaceAfter=12,
+            textColor=HexColor(letter_colors)
+        )
+            
+        entries = [("1. Estadísticas Ofensivas", "3"),
+            ("2. Estadísticas Defensivas", "7"),
+            ("3. Anexos", "11")]
+
+        def fill_dots(title, total_width=98):
+            width=total_width-len(title)-1
+            return title + " " 
+
+        index_story = []
+        index_story.append(Paragraph("Índice", title_style))
+        index_story.append(Spacer(1, 20))
+            
+        table_data = []
+        for title, page in entries:
+                
+            table_data.append([fill_dots(title, 96), page])
+
+        table = Table(table_data, colWidths=[150*mm, 20*mm])
+        table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 14),
+            ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ]))
+
+            
+        index_story.append(table)
 
         full_Story = ( 
             front_page_story + [PageBreak()] +
@@ -1909,74 +1675,22 @@ def create_report(player_id1,player_id2,wyscout_file1,parameters_file,position_n
             main_story6 + [PageBreak()] +
             main_story3 + [PageBreak()] +
             main_story5 + [PageBreak()] +
-            main_story4 +
-            physical_sections + [PageBreak()] +
+            main_story4 + [PageBreak()] +
             main_story23 + [PageBreak()] +
             main_story17 + [PageBreak()] +
             main_story18 + [PageBreak()] +
             main_story19 + [PageBreak()] +
             main_story20 + [PageBreak()] +
             main_story21 + [PageBreak()] +
-            main_story212 + [PageBreak()] +
             main_story15 + [PageBreak()] +
             main_story22 
             )
-    if summary==1:
-        physical_sections = (
-            [PageBreak()] + main_story_phys +
-            [PageBreak()] + main_story7
-        ) if has_physical_data else []
-
-        if PLAYER_POSITION=="Defensa" or PLAYER_POSITION=="Lateral" or PLAYER_POSITION=="Portera":
-            full_Story = ( 
-                front_page_story + [PageBreak()] +
-                index_story + [PageBreak()] +
-                main_story2 + [PageBreak()] +
-                main_story6 + [PageBreak()] +
-                main_story3 + [PageBreak()] +
-                main_story5 + [PageBreak()] +
-                main_story4 +
-                physical_sections + [PageBreak()] +
-                main_story23 + [PageBreak()] +
-                main_story17 + [PageBreak()] +
-                main_story18 + [PageBreak()] +
-                main_story19 + [PageBreak()] +
-                main_story20 + [PageBreak()] +
-                main_story21 + [PageBreak()] +
-                main_story212 + [PageBreak()] +
-                main_story15 + [PageBreak()] +
-                main_story22 
-                )
-        else:
-            full_Story = ( 
-                front_page_story + [PageBreak()] +
-                index_story + [PageBreak()] +
-                main_story2 + [PageBreak()] +
-                main_story6 + [PageBreak()] +
-                main_story3 + [PageBreak()] +
-                main_story5 + [PageBreak()] +
-                main_story4 +
-                physical_sections + [PageBreak()] +
-                main_story23 + [PageBreak()] +
-                main_story17 + [PageBreak()] +
-                main_story18 + [PageBreak()] +
-                main_story19 + [PageBreak()] +
-                main_story20 + [PageBreak()] +
-                main_story21 + [PageBreak()] +
-                main_story212 + [PageBreak()] +
-                main_story15 + [PageBreak()] +
-                main_story22 
-                )
-        
-
     doc.build(
         full_Story
     )
     # destination_folder="/Users/julieta/Dropbox/Informes_copy"
     # shutil.copy(output_filename, destination_folder)
     files_to_delete = paths_graficas_2D + [output_path1, output_path2, output_path3]
-    if has_physical_data and output_phys:
-        files_to_delete.append(output_phys)
     for image_file in files_to_delete:
         try:
             os.remove(image_file)
@@ -2003,7 +1717,7 @@ if __name__ == "__main__":
     parser.add_argument("--season1", type=str, default="2024/25")
     parser.add_argument("--season2", type=str, default=None)
     parser.add_argument("--pesos_file", type=str, default=None)
-    parser.add_argument("--pesos_file_fisico", type=str, default=None)
+    parser.add_argument("--logo_file", type=str, default=None)
 
     args = parser.parse_args()
 
@@ -2012,11 +1726,6 @@ if __name__ == "__main__":
     if args.pesos_file and _os.path.exists(args.pesos_file):
         with open(args.pesos_file, "r", encoding="utf-8") as _f:
             pesos_favorito = _json.load(_f)
-
-    pesos_fisicos = None
-    if args.pesos_file_fisico and _os.path.exists(args.pesos_file_fisico):
-        with open(args.pesos_file_fisico, "r", encoding="utf-8") as _f:
-            pesos_fisicos = _json.load(_f)
 
     create_report(
         player_id1=args.player_id1,
@@ -2033,7 +1742,7 @@ if __name__ == "__main__":
         season1=args.season1,
         season2=args.season2 if args.season2 else args.season1,
         pesos_favorito=pesos_favorito,
-        pesos_fisicos=pesos_fisicos,
+        logo_file=args.logo_file,
     )
 
 

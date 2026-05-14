@@ -52,6 +52,10 @@ if "df_comp2" not in st.session_state:
     st.session_state["df_comp2_nombre"] = None
     st.session_state["df_comp2_ruta_temp"] = None
 
+# ── Estado del logo personalizado (comparativo) ──
+if "logo_file_path_comp" not in st.session_state:
+    st.session_state["logo_file_path_comp"] = None
+
 st.markdown(":material/upload_file: **Archivos de datos**")
 st.caption("Si ambas jugadoras están en el mismo archivo, sube el mismo Excel en los dos campos. "
            "Si son de temporadas o competiciones distintas, sube un archivo diferente para cada una.")
@@ -194,6 +198,32 @@ def filtros_fragment():
     else:
         st.caption("No se ha encontrado archivo de configuraciones de pesos físicos.")
 
+    # ── Logo personalizado ──
+    st.markdown(":material/image: Logo del informe")
+    col_logo, col_logo_preview = st.columns([3, 1])
+    with col_logo:
+        uploaded_logo = st.file_uploader(
+            "📷 Subir logo personalizado — PNG o JPG (opcional, si no se sube se usará el logo URJC)",
+            type=["png", "jpg", "jpeg"],
+            key="uploader_logo_comp"
+        )
+        if uploaded_logo is not None:
+            import tempfile as _tmp_logo
+            ext = uploaded_logo.name.rsplit(".", 1)[-1]
+            tmp_logo = _tmp_logo.NamedTemporaryFile(suffix=f".{ext}", delete=False)
+            tmp_logo.write(uploaded_logo.read())
+            tmp_logo.close()
+            st.session_state["logo_file_path_comp"] = tmp_logo.name
+        elif st.session_state.get("logo_file_path_comp"):
+            st.caption(f"✅ Logo cargado: `{os.path.basename(st.session_state['logo_file_path_comp'])}`")
+        else:
+            st.caption("ℹ️ Sin logo personalizado — se usará el logo URJC por defecto.")
+    with col_logo_preview:
+        if uploaded_logo is not None:
+            st.image(uploaded_logo, width=80, caption="Vista previa")
+        elif st.session_state.get("logo_file_path_comp") and os.path.exists(st.session_state["logo_file_path_comp"]):
+            st.image(st.session_state["logo_file_path_comp"], width=80, caption="Logo actual")
+
     return {
         "ruta_script": ruta_script,
         "pesos_favorito_sel": pesos_favorito_sel,
@@ -207,6 +237,7 @@ def filtros_fragment():
         "min_minutes": min_minutes,
         "summary": summary,
         "same_player": same_player,
+        "logo_file_path": st.session_state.get("logo_file_path_comp"),
     }
 
 
@@ -270,6 +301,11 @@ if ejecutar:
                 "--color_selection", filtros.get("color_selection", "#FFFFFF"),
                 "--summary",       str(filtros.get("summary", 0)),
             ]
+            # Añadir logo personalizado si se ha subido
+            _logo_path = filtros.get("logo_file_path")
+            if _logo_path and os.path.exists(_logo_path):
+                cmd += ["--logo_file", _logo_path]
+
             # Añadir pesos tácticos si hay favorito seleccionado
             import json as _json, tempfile as _tempfile
             _pesos_sel = filtros.get("pesos_favorito_sel")
