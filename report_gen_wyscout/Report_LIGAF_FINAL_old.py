@@ -492,15 +492,14 @@ def create_report(player_id_analizing,wyscout_file,parameters_file,position_numb
             mask='auto'
         )
 
-        # Draw right logo (top-right corner) — dimensiones siempre fijas, independientes del logo izquierdo
-        _right_w = 0.75 * inch
-        _right_h = 0.89 * inch
+        # Draw right logo (top-right corner)
+        # Dimensiones hardcodeadas, completamente independientes del logo izquierdo
         canvas.drawImage(
             logo_right_path,
-            x=A4[0] - _right_w - 0.2 * inch,
-            y=A4[1] - _right_h - 0.2 * inch,
-            width=_right_w,
-            height=_right_h,
+            x=A4[0] - (0.89 * inch) - 0.2 * inch,
+            y=A4[1] - (0.89 * inch) - 0.2 * inch,
+            width=0.89 * inch,
+            height=0.89 * inch,
             mask='auto'
         )
         page_num = canvas.getPageNumber()

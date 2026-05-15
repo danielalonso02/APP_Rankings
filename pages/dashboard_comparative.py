@@ -56,6 +56,12 @@ if "df_comp2" not in st.session_state:
 if "logo_file_path_comp" not in st.session_state:
     st.session_state["logo_file_path_comp"] = None
 
+# ── Estado de las fotos de jugadoras (comparativo) ──
+if "player_file_path1_comp" not in st.session_state:
+    st.session_state["player_file_path1_comp"] = None
+if "player_file_path2_comp" not in st.session_state:
+    st.session_state["player_file_path2_comp"] = None
+
 st.markdown(":material/upload_file: **Archivos de datos**")
 st.caption("Si ambas jugadoras están en el mismo archivo, sube el mismo Excel en los dos campos. "
            "Si son de temporadas o competiciones distintas, sube un archivo diferente para cada una.")
@@ -198,6 +204,54 @@ def filtros_fragment():
     else:
         st.caption("No se ha encontrado archivo de configuraciones de pesos físicos.")
 
+    # ── Fotos de jugadoras ──
+    st.markdown(":material/person: Fotos de jugadoras")
+    col_p1, col_p1_prev, col_sep, col_p2, col_p2_prev = st.columns([3, 1, 0.2, 3, 1])
+    with col_p1:
+        uploaded_player1 = st.file_uploader(
+            "📷 OPCIONAL — Foto jugadora 1 — PNG o JPG",
+            type=["png", "jpg", "jpeg"],
+            key="uploader_player1_comp"
+        )
+        if uploaded_player1 is not None:
+            import tempfile as _tmp_p1
+            ext_p1 = uploaded_player1.name.rsplit(".", 1)[-1]
+            tmp_p1 = _tmp_p1.NamedTemporaryFile(suffix=f".{ext_p1}", delete=False)
+            tmp_p1.write(uploaded_player1.read())
+            tmp_p1.close()
+            st.session_state["player_file_path1_comp"] = tmp_p1.name
+        elif st.session_state.get("player_file_path1_comp"):
+            st.caption(f"✅ {os.path.basename(st.session_state['player_file_path1_comp'])}")
+        else:
+            st.caption("ℹ️ Se usará imagen genérica.")
+    with col_p1_prev:
+        if uploaded_player1 is not None:
+            st.image(uploaded_player1, width=60, caption="J1")
+        elif st.session_state.get("player_file_path1_comp") and os.path.exists(st.session_state["player_file_path1_comp"]):
+            st.image(st.session_state["player_file_path1_comp"], width=60, caption="J1")
+    with col_p2:
+        uploaded_player2 = st.file_uploader(
+            "📷 OPCIONAL — Foto jugadora 2 — PNG o JPG",
+            type=["png", "jpg", "jpeg"],
+            key="uploader_player2_comp"
+        )
+        if uploaded_player2 is not None:
+            import tempfile as _tmp_p2
+            ext_p2 = uploaded_player2.name.rsplit(".", 1)[-1]
+            tmp_p2 = _tmp_p2.NamedTemporaryFile(suffix=f".{ext_p2}", delete=False)
+            tmp_p2.write(uploaded_player2.read())
+            tmp_p2.close()
+            st.session_state["player_file_path2_comp"] = tmp_p2.name
+        elif st.session_state.get("player_file_path2_comp"):
+            st.caption(f"✅ {os.path.basename(st.session_state['player_file_path2_comp'])}")
+        else:
+            st.caption("ℹ️ Se usará imagen genérica.")
+    with col_p2_prev:
+        if uploaded_player2 is not None:
+            st.image(uploaded_player2, width=60, caption="J2")
+        elif st.session_state.get("player_file_path2_comp") and os.path.exists(st.session_state["player_file_path2_comp"]):
+            st.image(st.session_state["player_file_path2_comp"], width=60, caption="J2")
+
     # ── Logo personalizado ──
     st.markdown(":material/image: Logo del informe")
     col_logo, col_logo_preview = st.columns([3, 1])
@@ -238,6 +292,8 @@ def filtros_fragment():
         "summary": summary,
         "same_player": same_player,
         "logo_file_path": st.session_state.get("logo_file_path_comp"),
+        "player_file_path1": st.session_state.get("player_file_path1_comp"),
+        "player_file_path2": st.session_state.get("player_file_path2_comp"),
     }
 
 
@@ -305,6 +361,14 @@ if ejecutar:
             _logo_path = filtros.get("logo_file_path")
             if _logo_path and os.path.exists(_logo_path):
                 cmd += ["--logo_file", _logo_path]
+
+            # Añadir fotos de jugadoras si se han subido
+            _player1_path = filtros.get("player_file_path1")
+            if _player1_path and os.path.exists(_player1_path):
+                cmd += ["--player_file1", _player1_path]
+            _player2_path = filtros.get("player_file_path2")
+            if _player2_path and os.path.exists(_player2_path):
+                cmd += ["--player_file2", _player2_path]
 
             # Añadir pesos tácticos si hay favorito seleccionado
             import json as _json, tempfile as _tempfile

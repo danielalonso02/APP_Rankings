@@ -78,7 +78,7 @@ warnings.simplefilter(action="ignore", category=pd.errors.PerformanceWarning)
 BASE_DIR = os.path.dirname(os.path.dirname(__file__)) 
 current_l="Liga F"
 current_season="2025/26"
-def create_report(player_id_analizing,wyscout_file,parameters_file,position_number,min_minutes,color_selection="#FFFFFF",summary=0,current_league=current_l,season="2024/25",pesos_favorito=None,logo_file=None):
+def create_report(player_id_analizing,wyscout_file,parameters_file,position_number,min_minutes,color_selection="#FFFFFF",summary=0,current_league=current_l,season="2024/25",pesos_favorito=None,logo_file=None,player_file=None):
     
     
     print("BASE DIR:",BASE_DIR)
@@ -129,7 +129,7 @@ def create_report(player_id_analizing,wyscout_file,parameters_file,position_numb
     img_path_2="Logos/icons8-goal-64.png"
     img_path_3="Logos/icons8-kick-off-64.png"
 
-    player_path="Logos/player_Generic.jpeg"
+    player_path = player_file if (player_file and os.path.exists(player_file)) else "Logos/player_Generic.jpeg"
     if not os.path.exists(img_path_1):
         print(f"El fichero {img_path_1} no existe.")
         return None
@@ -545,8 +545,15 @@ def create_report(player_id_analizing,wyscout_file,parameters_file,position_numb
     front_page_story.append(Paragraph(data_text, data_style))
     front_page_story.append(Spacer(0,20))
 
-    # Foto del Jugador
-    photo = Image(PLAYER_PHOTO, width=123.5, height=140)
+    # Foto del Jugador — dimensiones respetando aspect ratio dentro de bounding box 123.5x140
+    _p_pil = PILImage.open(PLAYER_PHOTO)
+    _p_w, _p_h = _p_pil.size
+    _p_pil.close()
+    _max_w, _max_h = 123.5, 140
+    _scale = min(_max_w / _p_w, _max_h / _p_h)
+    _photo_w = _p_w * _scale
+    _photo_h = _p_h * _scale
+    photo = Image(PLAYER_PHOTO, width=_photo_w, height=_photo_h)
     photo.hAlign = 'CENTER'
     front_page_story.append(photo)
     front_page_story.append(Spacer(1, 0.2 * inch))
@@ -1354,6 +1361,7 @@ if __name__ == "__main__":
     parser.add_argument("--season", type=str, default="2024/25")
     parser.add_argument("--pesos_file", type=str, default=None)
     parser.add_argument("--logo_file", type=str, default=None)
+    parser.add_argument("--player_file", type=str, default=None)
 
     args = parser.parse_args()
     pesos_favorito = None
@@ -1373,4 +1381,5 @@ if __name__ == "__main__":
         season=args.season,
         pesos_favorito=pesos_favorito,
         logo_file=args.logo_file,
+        player_file=args.player_file,
     )

@@ -73,7 +73,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 
 current_l="La Liga"
 current_season="2024/25"
-def create_report(player_id1,player_id2,wyscout_file1,parameters_file,position_number,min_minutes,color_selection="#FFFFFF",summary=0,league1=current_l,league2=current_l,season1="2024/25",season2="2024/25",wyscout_file2=None,pesos_favorito=None,logo_file=None):
+def create_report(player_id1,player_id2,wyscout_file1,parameters_file,position_number,min_minutes,color_selection="#FFFFFF",summary=0,league1=current_l,league2=current_l,season1="2024/25",season2="2024/25",wyscout_file2=None,pesos_favorito=None,logo_file=None,player_file1=None,player_file2=None):
     
     
     
@@ -139,7 +139,10 @@ def create_report(player_id1,player_id2,wyscout_file1,parameters_file,position_n
     img_path_2="Logos/icons8-goal-64.png"
     img_path_3="Logos/icons8-kick-off-64.png"
 
-    player_path="Logos/player_Generic.jpeg"
+    _generic_player = "Logos/player_Generic.jpeg"
+    player_path1 = player_file1 if (player_file1 and os.path.exists(player_file1)) else _generic_player
+    player_path2 = player_file2 if (player_file2 and os.path.exists(player_file2)) else _generic_player
+    player_path = _generic_player  # fallback para usos genéricos
     if not os.path.exists(img_path_1):
         print(f"El fichero {img_path_1} no existe.")
         return None
@@ -393,10 +396,11 @@ def create_report(player_id1,player_id2,wyscout_file1,parameters_file,position_n
     #Imagenes
 
    # TEAM_LOGO = complete_teampath
-    PLAYER_LOGO=player_path
+    PLAYER_LOGO = player_path1
 
     #mas cositas
-    PLAYER_PHOTO = player_path
+    PLAYER_PHOTO1 = player_path1
+    PLAYER_PHOTO2 = player_path2
     #jugador 1
     PLAYER_NAME1 = player_name1
     PLAYER_TEAM1 = player_team1
@@ -705,8 +709,19 @@ def create_report(player_id1,player_id2,wyscout_file1,parameters_file,position_n
     names1=f"{PLAYER_NAME1} | {PLAYER_TEAM1}"
     names2=f"{PLAYER_NAME2} | {PLAYER_TEAM2}"
     
-    photo1 = Image(PLAYER_PHOTO, width=61.75, height=70)
-    photo2 = Image(PLAYER_PHOTO, width=61.75, height=70)
+    # Foto jugadora 1 — aspect ratio respetado dentro de bounding box 61.75x70
+    _p1 = PILImage.open(PLAYER_PHOTO1)
+    _p1_w, _p1_h = _p1.size
+    _p1.close()
+    _s1 = min(61.75 / _p1_w, 70 / _p1_h)
+    photo1 = Image(PLAYER_PHOTO1, width=_p1_w * _s1, height=_p1_h * _s1)
+
+    # Foto jugadora 2 — aspect ratio respetado dentro de bounding box 61.75x70
+    _p2 = PILImage.open(PLAYER_PHOTO2)
+    _p2_w, _p2_h = _p2.size
+    _p2.close()
+    _s2 = min(61.75 / _p2_w, 70 / _p2_h)
+    photo2 = Image(PLAYER_PHOTO2, width=_p2_w * _s2, height=_p2_h * _s2)
 
     # Las fotitos de las stats
     imgs_row_1 = [Image(img_path_1, width=30, height=30),
@@ -995,7 +1010,7 @@ def create_report(player_id1,player_id2,wyscout_file1,parameters_file,position_n
 
     ####
     #IMAGEN FOTO JUGADOR
-    image_path = os.path.realpath(PLAYER_PHOTO)
+    image_path = os.path.realpath(PLAYER_PHOTO1)
     
     #### Pagina Glossary wyscout
     main_story15=[]
@@ -1717,6 +1732,8 @@ if __name__ == "__main__":
     parser.add_argument("--season2", type=str, default=None)
     parser.add_argument("--pesos_file", type=str, default=None)
     parser.add_argument("--logo_file", type=str, default=None)
+    parser.add_argument("--player_file1", type=str, default=None)
+    parser.add_argument("--player_file2", type=str, default=None)
 
     args = parser.parse_args()
 
@@ -1742,6 +1759,8 @@ if __name__ == "__main__":
         season2=args.season2 if args.season2 else args.season1,
         pesos_favorito=pesos_favorito,
         logo_file=args.logo_file,
+        player_file1=args.player_file1,
+        player_file2=args.player_file2,
     )
 
 

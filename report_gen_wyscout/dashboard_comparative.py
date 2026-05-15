@@ -11,6 +11,7 @@ import glob
 from pathlib import Path
 from utils.constants import init_report_session_state
 from utils.styles import inject_report_css, page_header, page_footer, loader_display, log_viewer
+import pandas as pd
 
 
 st.set_page_config(
@@ -31,13 +32,93 @@ page_header("Informe Comparativo", "Comparación de rendimiento entre dos jugado
 init_report_session_state()
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-ruta_script = os.path.join(BASE_DIR, "report_gen_comparative", "Report_LIGAF_Comparative.py")
+ruta_script = os.path.join(BASE_DIR, "report_gen_wyscout", "Report_LIGAF_Comparative.py")
 directorio_logs = os.path.join(BASE_DIR, "logs")
 ruta_excel2 = os.path.join(BASE_DIR)
 directorio_base = os.path.dirname(ruta_script)
-parameters_route_xlsx = os.path.join(BASE_DIR, "report_gen_comparative", "parameters.xlsx")
+parameters_route_xlsx = os.path.join(BASE_DIR, "report_gen_wyscout", "parameters.xlsx")
+RUTA_FAVORITOS = os.path.join(BASE_DIR, "config_pesos_favoritos.json")
+RUTA_FAVORITOS_FIS = os.path.join(BASE_DIR, "config_pesos_fisicos.json")
 
 os.makedirs(directorio_logs, exist_ok=True)
+
+# ── Uploader: puede subir 1 o 2 archivos (si ambas jugadoras están en el mismo Excel, basta uno) ──
+if "df_comp1" not in st.session_state:
+    st.session_state["df_comp1"] = None
+    st.session_state["df_comp1_nombre"] = None
+    st.session_state["df_comp1_ruta_temp"] = None
+if "df_comp2" not in st.session_state:
+    st.session_state["df_comp2"] = None
+    st.session_state["df_comp2_nombre"] = None
+    st.session_state["df_comp2_ruta_temp"] = None
+
+# ── Estado del logo personalizado (comparativo) ──
+if "logo_file_path_comp" not in st.session_state:
+    st.session_state["logo_file_path_comp"] = None
+
+# ── Estado de las fotos de jugadoras (comparativo) ──
+if "player_file_path1_comp" not in st.session_state:
+    st.session_state["player_file_path1_comp"] = None
+if "player_file_path2_comp" not in st.session_state:
+    st.session_state["player_file_path2_comp"] = None
+
+st.markdown(":material/upload_file: **Archivos de datos**")
+st.caption("Si ambas jugadoras están en el mismo archivo, sube el mismo Excel en los dos campos. "
+           "Si son de temporadas o competiciones distintas, sube un archivo diferente para cada una.")
+
+up_col1, up_col2 = st.columns(2)
+
+def _save_temp(file_bytes):
+    import tempfile as _t
+    f = _t.NamedTemporaryFile(suffix=".xlsx", delete=False)
+    f.write(file_bytes)
+    f.close()
+    return f.name
+
+with up_col1:
+    st.markdown("**Jugadora 1 — archivo de datos**")
+    if st.session_state["df_comp1"] is not None:
+        st.success(f"✅ {st.session_state['df_comp1_nombre']} ({len(st.session_state['df_comp1']):,} filas)")
+        if st.button("🔄 Cambiar", key="cambiar_comp1", use_container_width=True):
+            st.session_state["df_comp1"] = None
+            st.session_state["df_comp1_nombre"] = None
+            st.session_state["df_comp1_ruta_temp"] = None
+            st.rerun()
+    else:
+        up1 = st.file_uploader("Archivo jugadora 1 (.xlsx)", type=["xlsx"], key="uploader_comp1", label_visibility="collapsed")
+        if up1:
+            import io as _io_c
+            b = up1.read()
+            st.session_state["df_comp1"] = pd.read_excel(_io_c.BytesIO(b))
+            st.session_state["df_comp1_nombre"] = up1.name
+            st.session_state["df_comp1_ruta_temp"] = _save_temp(b)
+            st.rerun()
+
+with up_col2:
+    st.markdown("**Jugadora 2 — archivo de datos**")
+    if st.session_state["df_comp2"] is not None:
+        st.success(f"✅ {st.session_state['df_comp2_nombre']} ({len(st.session_state['df_comp2']):,} filas)")
+        if st.button("🔄 Cambiar", key="cambiar_comp2", use_container_width=True):
+            st.session_state["df_comp2"] = None
+            st.session_state["df_comp2_nombre"] = None
+            st.session_state["df_comp2_ruta_temp"] = None
+            st.rerun()
+    else:
+        up2 = st.file_uploader("Archivo jugadora 2 (.xlsx)", type=["xlsx"], key="uploader_comp2", label_visibility="collapsed")
+        if up2:
+            import io as _io_c2
+            b2 = up2.read()
+            st.session_state["df_comp2"] = pd.read_excel(_io_c2.BytesIO(b2))
+            st.session_state["df_comp2_nombre"] = up2.name
+            st.session_state["df_comp2_ruta_temp"] = _save_temp(b2)
+            st.rerun()
+
+if st.session_state["df_comp1"] is None or st.session_state["df_comp2"] is None:
+    st.info("ℹ️ Sube los archivos de datos para continuar.")
+    st.stop()
+
+df_jugadoras1 = st.session_state["df_comp1"]
+df_jugadoras2 = st.session_state["df_comp2"]
 
 
 def filtros_fragment():
@@ -59,14 +140,7 @@ def filtros_fragment():
     # --- JUGADORA 1 ---
     with col4:
         st.markdown("**Jugadora 1**")
-        championship_excel1 = util.select_competicion(key="competicion_1")
-        league1 = util.from_excel_to_str(championship_excel1)
-        year1 = util.select_season(key="temporada_1")
-        season1 = util.convert_season(year1)
-
-        df2_p1 = util.leer_excel_jugadores2(ruta_excel2, championship_excel1, year1)
-        lista_jugadoras1 = util.obtener_lista_jugadores(df2_p1, "Jugadores") if df2_p1 is not None else []
-
+        lista_jugadoras1 = util.obtener_lista_jugadores(df_jugadoras1, "Jugadores") if df_jugadoras1 is not None else []
         player1 = st.selectbox(
             "Jugadora 1:",
             lista_jugadoras1,
@@ -74,23 +148,12 @@ def filtros_fragment():
             key="player1",
             label_visibility="collapsed"
         )
-        wyscout_file1 = f"{championship_excel1}_wyscout_{year1}.xlsx"
-        player_id1 = util.obtener_id_jugador(
-            f"{ruta_excel2}/{wyscout_file1}",
-            player_name=player1
-        ) if player1 else None
+        player_id1 = util.obtener_id_jugador_df(df_jugadoras1, player_name=player1) if player1 else None
 
     # --- JUGADORA 2 ---
     with col5:
         st.markdown("**Jugadora 2**")
-        championship_excel2 = util.select_competicion(key="competicion_2")
-        league2 = util.from_excel_to_str(championship_excel2)
-        year2 = util.select_season(key="temporada_2")
-        season2 = util.convert_season(year2)
-
-        df2_p2 = util.leer_excel_jugadores2(ruta_excel2, championship_excel2, year2)
-        lista_jugadoras2 = util.obtener_lista_jugadores(df2_p2, "Jugadores") if df2_p2 is not None else []
-
+        lista_jugadoras2 = util.obtener_lista_jugadores(df_jugadoras2, "Jugadores") if df_jugadoras2 is not None else []
         player2 = st.selectbox(
             "Jugadora 2:",
             lista_jugadoras2,
@@ -98,65 +161,159 @@ def filtros_fragment():
             key="player2",
             label_visibility="collapsed"
         )
-        wyscout_file2 = f"{championship_excel2}_wyscout_{year2}.xlsx"
-        player_id2 = util.obtener_id_jugador(
-            f"{ruta_excel2}/{wyscout_file2}",
-            player_name=player2
-        ) if player2 else None
+        player_id2 = util.obtener_id_jugador_df(df_jugadoras2, player_name=player2) if player2 else None
 
     # Aviso si misma jugadora y mismo archivo
     same_player = (
         player1 == player2
-        and wyscout_file1 == wyscout_file2
+        and st.session_state["df_comp1_nombre"] == st.session_state["df_comp2_nombre"]
         and player1 is not None
         and player2 is not None
     )
     if same_player:
         st.warning("⚠️ Has seleccionado la misma jugadora dos veces. Por favor, elige jugadoras distintas.")
 
-    # Liga y temporada combinadas para el título del informe
-    if league1 == league2 and season1 == season2:
-        league_display = league1
-        season_display = season1
+    # ── Selectores de configuración de pesos ──
+    import json as _json
+    st.markdown(":material/tune: Configuración de pesos")
+    pesos_favorito_sel = None
+    if os.path.exists(RUTA_FAVORITOS):
+        with open(RUTA_FAVORITOS, "r", encoding="utf-8") as _f:
+            _favs = _json.load(_f)
+        if _favs:
+            _opciones = ["Sin favorito (pesos por defecto)"] + list(_favs.keys())
+            _sel = st.selectbox("Configuración de pesos tácticos:", _opciones, key="pesos_sel_comp")
+            if _sel != "Sin favorito (pesos por defecto)":
+                pesos_favorito_sel = _sel
+        else:
+            st.caption("No hay configuraciones tácticas guardadas en Rankings.")
     else:
-        league_display = f"{league1} / {league2}"
-        season_display = f"{season1} / {season2}"
+        st.caption("No se ha encontrado archivo de configuraciones de pesos tácticos.")
+
+    pesos_fisicos_sel = None
+    if os.path.exists(RUTA_FAVORITOS_FIS):
+        with open(RUTA_FAVORITOS_FIS, "r", encoding="utf-8") as _f2:
+            _favs_fis = _json.load(_f2)
+        if _favs_fis:
+            _opciones_fis = ["Sin favorito (pesos por defecto)"] + list(_favs_fis.keys())
+            _sel_fis = st.selectbox("Configuración de pesos físicos:", _opciones_fis, key="pesos_fisicos_sel_comp")
+            if _sel_fis != "Sin favorito (pesos por defecto)":
+                pesos_fisicos_sel = _sel_fis
+        else:
+            st.caption("No hay configuraciones físicas guardadas en Rankings Físicos.")
+    else:
+        st.caption("No se ha encontrado archivo de configuraciones de pesos físicos.")
+
+    # ── Fotos de jugadoras ──
+    st.markdown(":material/person: Fotos de jugadoras")
+    col_p1, col_p1_prev, col_sep, col_p2, col_p2_prev = st.columns([3, 1, 0.2, 3, 1])
+    with col_p1:
+        uploaded_player1 = st.file_uploader(
+            "📷 OPCIONAL — Foto jugadora 1 — PNG o JPG",
+            type=["png", "jpg", "jpeg"],
+            key="uploader_player1_comp"
+        )
+        if uploaded_player1 is not None:
+            import tempfile as _tmp_p1
+            ext_p1 = uploaded_player1.name.rsplit(".", 1)[-1]
+            tmp_p1 = _tmp_p1.NamedTemporaryFile(suffix=f".{ext_p1}", delete=False)
+            tmp_p1.write(uploaded_player1.read())
+            tmp_p1.close()
+            st.session_state["player_file_path1_comp"] = tmp_p1.name
+        elif st.session_state.get("player_file_path1_comp"):
+            st.caption(f"✅ {os.path.basename(st.session_state['player_file_path1_comp'])}")
+        else:
+            st.caption("ℹ️ Se usará imagen genérica.")
+    with col_p1_prev:
+        if uploaded_player1 is not None:
+            st.image(uploaded_player1, width=60, caption="J1")
+        elif st.session_state.get("player_file_path1_comp") and os.path.exists(st.session_state["player_file_path1_comp"]):
+            st.image(st.session_state["player_file_path1_comp"], width=60, caption="J1")
+    with col_p2:
+        uploaded_player2 = st.file_uploader(
+            "📷 OPCIONAL — Foto jugadora 2 — PNG o JPG",
+            type=["png", "jpg", "jpeg"],
+            key="uploader_player2_comp"
+        )
+        if uploaded_player2 is not None:
+            import tempfile as _tmp_p2
+            ext_p2 = uploaded_player2.name.rsplit(".", 1)[-1]
+            tmp_p2 = _tmp_p2.NamedTemporaryFile(suffix=f".{ext_p2}", delete=False)
+            tmp_p2.write(uploaded_player2.read())
+            tmp_p2.close()
+            st.session_state["player_file_path2_comp"] = tmp_p2.name
+        elif st.session_state.get("player_file_path2_comp"):
+            st.caption(f"✅ {os.path.basename(st.session_state['player_file_path2_comp'])}")
+        else:
+            st.caption("ℹ️ Se usará imagen genérica.")
+    with col_p2_prev:
+        if uploaded_player2 is not None:
+            st.image(uploaded_player2, width=60, caption="J2")
+        elif st.session_state.get("player_file_path2_comp") and os.path.exists(st.session_state["player_file_path2_comp"]):
+            st.image(st.session_state["player_file_path2_comp"], width=60, caption="J2")
+
+    # ── Logo personalizado ──
+    st.markdown(":material/image: Logo del informe")
+    col_logo, col_logo_preview = st.columns([3, 1])
+    with col_logo:
+        uploaded_logo = st.file_uploader(
+            "📷 Subir logo personalizado — PNG o JPG (opcional, si no se sube se usará el logo URJC)",
+            type=["png", "jpg", "jpeg"],
+            key="uploader_logo_comp"
+        )
+        if uploaded_logo is not None:
+            import tempfile as _tmp_logo
+            ext = uploaded_logo.name.rsplit(".", 1)[-1]
+            tmp_logo = _tmp_logo.NamedTemporaryFile(suffix=f".{ext}", delete=False)
+            tmp_logo.write(uploaded_logo.read())
+            tmp_logo.close()
+            st.session_state["logo_file_path_comp"] = tmp_logo.name
+        elif st.session_state.get("logo_file_path_comp"):
+            st.caption(f"✅ Logo cargado: `{os.path.basename(st.session_state['logo_file_path_comp'])}`")
+        else:
+            st.caption("ℹ️ Sin logo personalizado — se usará el logo URJC por defecto.")
+    with col_logo_preview:
+        if uploaded_logo is not None:
+            st.image(uploaded_logo, width=80, caption="Vista previa")
+        elif st.session_state.get("logo_file_path_comp") and os.path.exists(st.session_state["logo_file_path_comp"]):
+            st.image(st.session_state["logo_file_path_comp"], width=80, caption="Logo actual")
 
     return {
         "ruta_script": ruta_script,
-        "wyscout_file1": wyscout_file1,
-        "wyscout_file2": wyscout_file2,
-        "championship_excel1": championship_excel1,
-        "championship_excel2": championship_excel2,
-        "year1": year1,
-        "year2": year2,
+        "pesos_favorito_sel": pesos_favorito_sel,
+        "pesos_fisicos_sel": pesos_fisicos_sel,
+        "wyscout_file1_temp": st.session_state["df_comp1_ruta_temp"],
+        "wyscout_file2_temp": st.session_state["df_comp2_ruta_temp"],
         "player_id1": player_id1,
         "player_id2": player_id2,
         "player1": player1,
         "player2": player2,
         "min_minutes": min_minutes,
         "summary": summary,
-        "season1": season1,
-        "season2": season2,
-        "league1": league1,
-        "league2": league2,
-        "league_display": league_display,
-        "season_display": season_display,
         "same_player": same_player,
+        "logo_file_path": st.session_state.get("logo_file_path_comp"),
+        "player_file_path1": st.session_state.get("player_file_path1_comp"),
+        "player_file_path2": st.session_state.get("player_file_path2_comp"),
     }
 
 
 filtros = filtros_fragment()
 
-# Mostrar tabla de la jugadora 1 y jugadora 2 side by side
+# Mostrar tabla de jugadora 1 y jugadora 2 side by side
 col_t1, col_t2 = st.columns(2)
 with col_t1:
-    st.caption(f"Datos: {filtros['championship_excel1']} {filtros['year1']}")
-    df_show1 = util.filter_df_show(f"{ruta_excel2}/{filtros['wyscout_file1']}")
+    st.caption(f"Datos: {st.session_state['df_comp1_nombre']}")
+    if filtros["player1"] and "Jugador" in df_jugadoras1.columns:
+        df_show1 = df_jugadoras1[df_jugadoras1["Jugador"] == filtros["player1"]]
+    else:
+        df_show1 = df_jugadoras1
     st.dataframe(df_show1, use_container_width=True)
 with col_t2:
-    st.caption(f"Datos: {filtros['championship_excel2']} {filtros['year2']}")
-    df_show2 = util.filter_df_show(f"{ruta_excel2}/{filtros['wyscout_file2']}")
+    st.caption(f"Datos: {st.session_state['df_comp2_nombre']}")
+    if filtros["player2"] and "Jugador" in df_jugadoras2.columns:
+        df_show2 = df_jugadoras2[df_jugadoras2["Jugador"] == filtros["player2"]]
+    else:
+        df_show2 = df_jugadoras2
     st.dataframe(df_show2, use_container_width=True)
 
 # Botón generar
@@ -192,18 +349,48 @@ if ejecutar:
                 sys.executable, "-u", str(ruta_script_path),
                 "--player_id1",    str(filtros["player_id1"]),
                 "--player_id2",    str(filtros["player_id2"]),
-                "--wyscout_file1", filtros["wyscout_file1"],
-                "--wyscout_file2", filtros["wyscout_file2"],
+                "--wyscout_file1", str(filtros["wyscout_file1_temp"]),
+                "--wyscout_file2", str(filtros["wyscout_file2_temp"]),
                 "--parameters_file", str(params_xlsx),
                 "--position_number", "1",
                 "--min_minutes",   str(filtros["min_minutes"]),
                 "--color_selection", filtros.get("color_selection", "#FFFFFF"),
                 "--summary",       str(filtros.get("summary", 0)),
-                "--league1",       str(filtros["league1"]),
-                "--league2",       str(filtros["league2"]),
-                "--season1",       str(filtros["season1"]),
-                "--season2",       str(filtros["season2"]),
             ]
+            # Añadir logo personalizado si se ha subido
+            _logo_path = filtros.get("logo_file_path")
+            if _logo_path and os.path.exists(_logo_path):
+                cmd += ["--logo_file", _logo_path]
+
+            # Añadir fotos de jugadoras si se han subido
+            _player1_path = filtros.get("player_file_path1")
+            if _player1_path and os.path.exists(_player1_path):
+                cmd += ["--player_file1", _player1_path]
+            _player2_path = filtros.get("player_file_path2")
+            if _player2_path and os.path.exists(_player2_path):
+                cmd += ["--player_file2", _player2_path]
+
+            # Añadir pesos tácticos si hay favorito seleccionado
+            import json as _json, tempfile as _tempfile
+            _pesos_sel = filtros.get("pesos_favorito_sel")
+            if _pesos_sel and os.path.exists(RUTA_FAVORITOS):
+                with open(RUTA_FAVORITOS, "r", encoding="utf-8") as _f:
+                    _all_favs = _json.load(_f)
+                if _pesos_sel in _all_favs:
+                    _tmp = _tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8")
+                    _json.dump(_all_favs[_pesos_sel], _tmp, ensure_ascii=False)
+                    _tmp.close()
+                    cmd += ["--pesos_file", _tmp.name]
+            # Añadir pesos físicos si hay favorito físico seleccionado
+            _pesos_fis_sel = filtros.get("pesos_fisicos_sel")
+            if _pesos_fis_sel and os.path.exists(RUTA_FAVORITOS_FIS):
+                with open(RUTA_FAVORITOS_FIS, "r", encoding="utf-8") as _f2:
+                    _all_favs_fis = _json.load(_f2)
+                if _pesos_fis_sel in _all_favs_fis:
+                    _tmp_fis = _tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8")
+                    _json.dump(_all_favs_fis[_pesos_fis_sel], _tmp_fis, ensure_ascii=False)
+                    _tmp_fis.close()
+                    cmd += ["--pesos_file_fisico", _tmp_fis.name]
 
             proc = subprocess.Popen(
                 cmd,
@@ -238,7 +425,7 @@ def get_latest_pdf(folder_path):
     return max(pdf_files, key=os.path.getmtime)
 
 
-folder = "report_gen/ReportsGenerados"
+folder = "report_gen_comparative/ReportsGenerados"
 latest_pdf_path = get_latest_pdf(folder)
 
 if latest_pdf_path:

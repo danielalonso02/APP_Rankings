@@ -55,6 +55,10 @@ if "df_dashboard" not in st.session_state:
 if "logo_file_path" not in st.session_state:
     st.session_state["logo_file_path"] = None
 
+# ── Estado de la foto del jugador ──
+if "player_file_path" not in st.session_state:
+    st.session_state["player_file_path"] = None
+
 if st.session_state["df_dashboard"] is not None:
     col_info, col_cambiar = st.columns([3, 1])
     with col_info:
@@ -143,6 +147,32 @@ def filtros_fragment():
         elif st.session_state.get("logo_file_path") and os.path.exists(st.session_state["logo_file_path"]):
             st.image(st.session_state["logo_file_path"], width=80, caption="Logo actual")
 
+    # ── Foto del jugador ──
+    st.markdown(":material/person: Foto del jugador/a")
+    col_player, col_player_preview = st.columns([3, 1])
+    with col_player:
+        uploaded_player = st.file_uploader(
+            "📷 OPCIONAL — Subir foto del jugador/a — PNG o JPG",
+            type=["png", "jpg", "jpeg"],
+            key="uploader_player"
+        )
+        if uploaded_player is not None:
+            import tempfile as _tmp_player
+            ext_p = uploaded_player.name.rsplit(".", 1)[-1]
+            tmp_player = _tmp_player.NamedTemporaryFile(suffix=f".{ext_p}", delete=False)
+            tmp_player.write(uploaded_player.read())
+            tmp_player.close()
+            st.session_state["player_file_path"] = tmp_player.name
+        elif st.session_state.get("player_file_path"):
+            st.caption(f"✅ Foto cargada: `{os.path.basename(st.session_state['player_file_path'])}`")
+        else:
+            st.caption("ℹ️ Sin foto — se usará la imagen genérica por defecto.")
+    with col_player_preview:
+        if uploaded_player is not None:
+            st.image(uploaded_player, width=80, caption="Vista previa")
+        elif st.session_state.get("player_file_path") and os.path.exists(st.session_state["player_file_path"]):
+            st.image(st.session_state["player_file_path"], width=80, caption="Foto actual")
+
     # ── Selector de configuración de pesos ──
     st.markdown(":material/tune: Configuración de pesos")
     pesos_favorito_sel = None
@@ -184,6 +214,7 @@ def filtros_fragment():
         "pesos_fisicos_sel": pesos_fisicos_sel,
         "wyscout_file_temp": ruta_archivo_temp,
         "logo_file_path": st.session_state.get("logo_file_path"),
+        "player_file_path": st.session_state.get("player_file_path"),
     }
 
     # ── FIX: guardar siempre los filtros actuales en session_state ──
@@ -236,6 +267,11 @@ if ejecutar:
             _logo_path = filtros_ejecucion.get("logo_file_path")
             if _logo_path and os.path.exists(_logo_path):
                 cmd += ["--logo_file", _logo_path]
+
+            # Añadir foto del jugador si se ha subido
+            _player_path = filtros_ejecucion.get("player_file_path")
+            if _player_path and os.path.exists(_player_path):
+                cmd += ["--player_file", _player_path]
 
             # Añadir pesos tácticos si hay favorito seleccionado
             import json as _json, tempfile as _tempfile
